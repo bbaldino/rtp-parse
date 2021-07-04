@@ -17,7 +17,7 @@ use packet_parsing::{
 ///   zero a valid length and avoids a possible infinite loop in
 ///   scanning a compound RTCP packet, while counting 32-bit words
 ///   avoids a validity check for a multiple of 4.)
-
+#[derive(Debug)]
 pub struct RtcpHeader {
     pub version: u8,
     pub has_padding: bool,

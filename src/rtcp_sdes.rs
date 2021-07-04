@@ -117,3 +117,42 @@ pub fn parse_sdes_item(buf: &mut dyn ReadableBuf) -> RtpParseResult<SdesItem> {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use bitbuffer::bit_buffer::BitBuffer;
+
+    use super::*;
+
+    #[test]
+    fn test_parse_sdes_item_success() {
+        let str = "hello, world!";
+        let data = str.bytes();
+        let mut item_data = vec![0x1, data.len() as u8];
+        item_data.extend(data.collect::<Vec<u8>>());
+
+        let mut buf = BitBuffer::new(item_data);
+        let sdes_item = parse_sdes_item(&mut buf).unwrap();
+        match sdes_item {
+            SdesItem::Cname(v) => assert_eq!(v, str),
+            _ => assert!(false, "Wrong SdesItem type"),
+        }
+    }
+
+    #[test]
+    fn test_parse_sdes_item_bad_data() {
+        let data: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        let mut item_data = vec![0x1, data.len() as u8];
+        item_data.extend(data);
+
+        let mut buf = BitBuffer::new(item_data);
+        let res = parse_sdes_item(&mut buf);
+        assert!(res.is_err());
+    }
+
+    // TODO:
+    // parse_sdes_items (make sure we stop when seeing empty, correctly parse to end of buffer
+    // parse_sdes_chunk success | failure in chunk | failure in item
+    // parse_sdes_chunks
+    // parse_rtcp_sdes success | failure in chunk
+}

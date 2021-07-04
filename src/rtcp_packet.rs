@@ -1,9 +1,9 @@
 use bitbuffer::readable_buf::ReadableBuf;
-use packet_parsing::{error::ValidationError, packet_parsing::try_parse_field};
-use std::error::Error;
+use packet_parsing::packet_parsing::try_parse_field;
 
 use crate::{
     error::{InvalidLengthValue, RtpParseResult, UnrecognizedPacketType},
+    rtcp_bye::{parse_rtcp_bye, RtcpByePacket},
     rtcp_header::{parse_rtcp_header, RtcpHeader},
     rtcp_sdes::{parse_rtcp_sdes, RtcpSdesPacket},
 };
@@ -11,6 +11,7 @@ use crate::{
 pub enum SomeRtcpPacket {
     CompoundRtcpPacket(Vec<SomeRtcpPacket>),
     RtcpSdesPacket(RtcpSdesPacket),
+    RtcpByePacket(RtcpByePacket),
 }
 pub struct RtcpPacket;
 
@@ -44,6 +45,7 @@ pub fn parse_single_rtcp_packet(buf: &mut dyn ReadableBuf) -> RtpParseResult<Som
             RtcpSdesPacket::PT => Ok(SomeRtcpPacket::RtcpSdesPacket(parse_rtcp_sdes(
                 buf, header,
             )?)),
+            RtcpByePacket::PT => Ok(SomeRtcpPacket::RtcpByePacket(parse_rtcp_bye(header, buf)?)),
             pt @ _ => Err(Box::new(UnrecognizedPacketType(pt))),
         }
     })
