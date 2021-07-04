@@ -5,7 +5,7 @@ use packet_parsing::error::PacketParseResult;
 use packet_parsing::packet_parsing::try_parse_field;
 
 use crate::error::RtpParseResult;
-use crate::rtcp_header::RtcpHeader;
+use crate::rtcp::rtcp_header::RtcpHeader;
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.5
 ///         0                   1                   2                   3

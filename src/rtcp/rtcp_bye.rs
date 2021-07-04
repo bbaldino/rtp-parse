@@ -3,7 +3,7 @@ use std::str::from_utf8;
 use bitbuffer::readable_buf::ReadableBuf;
 use packet_parsing::packet_parsing::try_parse_field;
 
-use crate::{error::RtpParseResult, rtcp_header::RtcpHeader};
+use crate::{error::RtpParseResult, rtcp::rtcp_header::RtcpHeader};
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.6
 ///        0                   1                   2                   3

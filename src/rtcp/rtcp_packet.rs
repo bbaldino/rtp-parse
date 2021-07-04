@@ -3,9 +3,9 @@ use packet_parsing::packet_parsing::try_parse_field;
 
 use crate::{
     error::{InvalidLengthValue, RtpParseResult, UnrecognizedPacketType},
-    rtcp_bye::{parse_rtcp_bye, RtcpByePacket},
-    rtcp_header::{parse_rtcp_header, RtcpHeader},
-    rtcp_sdes::{parse_rtcp_sdes, RtcpSdesPacket},
+    rtcp::rtcp_bye::{parse_rtcp_bye, RtcpByePacket},
+    rtcp::rtcp_header::{parse_rtcp_header, RtcpHeader},
+    rtcp::rtcp_sdes::{parse_rtcp_sdes, RtcpSdesPacket},
 };
 
 pub enum SomeRtcpPacket {
