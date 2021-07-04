@@ -8,3 +8,4 @@ edition = "2018"
 [dependencies]
 packet_parsing = { path = "../packet_parsing" }
 bitbuffer = { git = "https://github.com/bbaldino/bitbuffer" }
+thiserror = "1.0"

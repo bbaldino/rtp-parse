@@ -1,9 +1,22 @@
 use bitbuffer::readable_buf::ReadableBuf;
 use packet_parsing::{
     error::{PacketParseResult, ValidationError, ValidationResult},
-    field_buffer::FieldBuffer,
-    packet_parsing::try_parse_field_group,
+    packet_parsing::{try_parse_field, RequireEqual, Validatable},
 };
+
+/// https://datatracker.ietf.org/doc/html/rfc3550#section-6.1
+///  0                   1                   2                   3
+///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |V=2|P|    SC   |  PT=SDES=202  |             length            |
+/// +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
+///
+/// length: 16 bits
+///   The length of this RTCP packet in 32-bit words minus one,
+///   including the header and any padding.  (The offset of one makes
+///   zero a valid length and avoids a possible infinite loop in
+///   scanning a compound RTCP packet, while counting 32-bit words
+///   avoids a validity check for a multiple of 4.)
 
 pub struct RtcpHeader {
     pub version: u8,
@@ -13,7 +26,15 @@ pub struct RtcpHeader {
     pub length_field: u16,
 }
 
-fn validate_packet_type(packet_type: u8) -> ValidationResult {
+impl RtcpHeader {
+    pub const SIZE_BYTES: usize = 4;
+
+    pub fn length_bytes(&self) -> usize {
+        (self.length_field as usize + 1) * 4
+    }
+}
+
+fn validate_packet_type(packet_type: &u8) -> ValidationResult {
     match packet_type {
         90..=120 => Ok(()),
         _ => Err(ValidationError(format!(
@@ -23,35 +44,16 @@ fn validate_packet_type(packet_type: u8) -> ValidationResult {
     }
 }
 
-fn validate_version(version: u8) -> ValidationResult {
-    match version {
-        2 => Ok(()),
-        _ => Err(ValidationError(format!(
-            "Expected version 2, got {}",
-            version
-        ))),
-    }
-}
-
 pub fn parse_rtcp_header(buf: &mut dyn ReadableBuf) -> PacketParseResult<RtcpHeader> {
-    try_parse_field_group("rtcp header", || {
-        let packet_size = buf.bytes_remaining();
+    try_parse_field("rtcp header", || {
         Ok(RtcpHeader {
-            version: buf.read_bits_as_u8_field_and_validate(2, "version", validate_version)?,
-            has_padding: buf.read_bool_field("has padding")?,
-            report_count: buf.read_bits_as_u8_field(5, "report count")?,
-            packet_type: buf.read_u8_field_and_validate("packet type", validate_packet_type)?,
-            length_field: buf.read_u16_field_and_validate("length field", |length_field| {
-                // I don't know that this is how we'd want to validate the size...but could work
-                // (another way would be doing it at a higher level after the header had been
-                // parsed and validating how much 'space' was left in the buffer to make sure they
-                // match)
-                if (length_field + 1) * 4 > packet_size as u16 {
-                    Err(ValidationError(format!("Length field says packet is {} bytes long, but buffer is only {} bytes long", ((length_field + 1) * 4), packet_size)))
-                } else {
-                    Ok(())
-                }
+            version: try_parse_field("version", || buf.read_bits_as_u8(2)?.require_value(2))?,
+            has_padding: try_parse_field("has_padding", || buf.read_bit_as_bool())?,
+            report_count: try_parse_field("report count", || buf.read_bits_as_u8(5))?,
+            packet_type: try_parse_field("packet_type", || {
+                buf.read_u8()?.validate(validate_packet_type)
             })?,
+            length_field: try_parse_field("length field", || buf.read_u16())?,
         })
     })
 }
@@ -64,7 +66,7 @@ mod tests {
 
     #[test]
     fn test_parse_rtcp_header() {
-        let data: Vec<u8> = vec![0b10_1_00011, 90, 0x00, 0x05];
+        let data: Vec<u8> = vec![0b10_1_00011, 89, 0x00, 0x05];
 
         let mut buf = BitBuffer::new(data);
 

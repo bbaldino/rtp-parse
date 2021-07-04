@@ -1,10 +1,10 @@
 use std::str::from_utf8;
 
 use bitbuffer::readable_buf::ReadableBuf;
-use packet_parsing::error::{PacketParseResult, ToPacketParseResult};
-use packet_parsing::field_buffer::FieldBuffer;
-use packet_parsing::packet_parsing::{try_parse_field_group, Mappable};
+use packet_parsing::error::PacketParseResult;
+use packet_parsing::packet_parsing::try_parse_field;
 
+use crate::error::RtpParseResult;
 use crate::rtcp_header::RtcpHeader;
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.5
@@ -25,12 +25,14 @@ use crate::rtcp_header::RtcpHeader;
 ///        +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
 
 pub enum SdesItem {
-    Cname { user_and_domain_name: String },
+    Empty,
+    Cname(String),
+    Unknown { item_type: u8, data: Vec<u8> },
 }
 
 pub struct SdesChunk {
-    ssrc: u32,
-    sdes_item: SdesItem,
+    pub ssrc: u32,
+    pub sdes_item: SdesItem,
 }
 
 pub struct RtcpSdesPacket {
@@ -38,20 +40,51 @@ pub struct RtcpSdesPacket {
     pub chunks: Vec<SdesChunk>,
 }
 
+impl RtcpSdesPacket {
+    pub const PT: u8 = 202;
+}
+
 pub fn parse_rtcp_sdes(
     buf: &mut dyn ReadableBuf,
     header: RtcpHeader,
 ) -> PacketParseResult<RtcpSdesPacket> {
-    todo!()
+    try_parse_field("rtcp sdes", || {
+        let num_chunks = header.report_count as usize;
+        Ok(RtcpSdesPacket {
+            header,
+            chunks: parse_sdes_chunks(buf, num_chunks)?,
+        })
+    })
+}
+
+pub fn parse_sdes_chunks(
+    buf: &mut dyn ReadableBuf,
+    num_chunks: usize,
+) -> PacketParseResult<Vec<SdesChunk>> {
+    (0..num_chunks)
+        .map(|_| parse_sdes_chunk(buf))
+        .collect::<RtpParseResult<Vec<SdesChunk>>>()
 }
 
 pub fn parse_sdes_chunk(buf: &mut dyn ReadableBuf) -> PacketParseResult<SdesChunk> {
-    try_parse_field_group("sdes chunk", || {
+    try_parse_field("sdes chunk", || {
         Ok(SdesChunk {
-            ssrc: buf.read_u32_field("ssrc")?,
+            ssrc: try_parse_field("ssrc", || buf.read_u32())?,
             sdes_item: parse_sdes_item(buf)?,
         })
     })
+}
+
+pub fn parse_rtcp_sdes_items(buf: &mut dyn ReadableBuf) -> RtpParseResult<Vec<SdesItem>> {
+    let mut sdes_items: Vec<SdesItem> = Vec::new();
+    loop {
+        match parse_sdes_item(buf) {
+            Ok(SdesItem::Empty) => break,
+            Ok(item) => sdes_items.push(item),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(sdes_items)
 }
 
 ///
@@ -60,12 +93,27 @@ pub fn parse_sdes_chunk(buf: &mut dyn ReadableBuf) -> PacketParseResult<SdesChun
 ///    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///    |      ID       |     length    | value                       ...
 ///    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+pub fn parse_sdes_item(buf: &mut dyn ReadableBuf) -> RtpParseResult<SdesItem> {
+    try_parse_field("sdes item", || {
+        let id = try_parse_field("id", || buf.read_u8())?;
+        match id {
+            0 => Ok(SdesItem::Empty),
+            t @ _ => {
+                let length = try_parse_field("length", || buf.read_u8())?;
+                let bytes = try_parse_field("data", || buf.read_bytes(length as usize))?;
 
-pub fn parse_sdes_item(buf: &mut dyn ReadableBuf) -> PacketParseResult<SdesItem> {
-    let id = buf.read_u8_field("id")?;
-    let length = buf.read_u8_field("length")? as usize;
-    //let bytes = buf.read_bytes(length).to_ppr("sdes data")?.to_owned();
-    let bytes = buf.read_bytes_field(length, "sdes item value");
-    let x = from_utf8(bytes);
-    todo!()
+                // Now parse the payload according to the actual SDES item type
+                match t {
+                    1 => match from_utf8(bytes) {
+                        Ok(s) => Ok(SdesItem::Cname(s.to_owned())),
+                        Err(e) => Err(e.into()),
+                    },
+                    t @ _ => Ok(SdesItem::Unknown {
+                        item_type: t,
+                        data: bytes.to_vec(),
+                    }),
+                }
+            }
+        }
+    })
 }
