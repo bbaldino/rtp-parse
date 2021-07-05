@@ -1,7 +1,8 @@
 use bitbuffer::readable_buf::ReadableBuf;
 use packet_parsing::{
     error::{PacketParseResult, ValidationError, ValidationResult},
-    packet_parsing::{try_parse_field, RequireEqual, Validatable},
+    packet_parsing::try_parse_field,
+    validators::{RequireEqual, Validatable},
 };
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.1
