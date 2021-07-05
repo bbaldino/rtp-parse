@@ -9,11 +9,14 @@ use crate::{
     rtcp::rtcp_sdes::{parse_rtcp_sdes, RtcpSdesPacket},
 };
 
+use super::rtcp_sr::{parse_rtcp_sr, RtcpSrPacket};
+
 pub enum SomeRtcpPacket {
     CompoundRtcpPacket(Vec<SomeRtcpPacket>),
     RtcpSdesPacket(RtcpSdesPacket),
     RtcpByePacket(RtcpByePacket),
     RtcpRrPacket(RtcpRrPacket),
+    RtcpSrPacket(RtcpSrPacket),
 }
 
 pub fn parse_rtcp_packet(buf: &mut dyn ReadableBuf) -> RtpParseResult<SomeRtcpPacket> {
@@ -48,6 +51,7 @@ pub fn parse_single_rtcp_packet(buf: &mut dyn ReadableBuf) -> RtpParseResult<Som
             )?)),
             RtcpByePacket::PT => Ok(SomeRtcpPacket::RtcpByePacket(parse_rtcp_bye(header, buf)?)),
             RtcpRrPacket::PT => Ok(SomeRtcpPacket::RtcpRrPacket(parse_rtcp_rr(header, buf)?)),
+            RtcpSrPacket::PT => Ok(SomeRtcpPacket::RtcpSrPacket(parse_rtcp_sr(header, buf)?)),
             pt @ _ => Err(Box::new(UnrecognizedPacketType(pt))),
         }
     })
