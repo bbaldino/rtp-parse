@@ -39,6 +39,7 @@ use crate::error::RtpParseResult;
 ///        +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
 ///        |                  profile-specific extensions                  |
 ///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#[derive(Debug)]
 pub struct RtcpReportBlock {
     pub ssrc: u32,
     pub fraction_lost: u8,

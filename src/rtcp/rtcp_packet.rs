@@ -5,6 +5,7 @@ use crate::{
     error::{InvalidLengthValue, RtpParseResult, UnrecognizedPacketType},
     rtcp::rtcp_bye::{parse_rtcp_bye, RtcpByePacket},
     rtcp::rtcp_header::{parse_rtcp_header, RtcpHeader},
+    rtcp::rtcp_rr::{parse_rtcp_rr, RtcpRrPacket},
     rtcp::rtcp_sdes::{parse_rtcp_sdes, RtcpSdesPacket},
 };
 
@@ -12,8 +13,8 @@ pub enum SomeRtcpPacket {
     CompoundRtcpPacket(Vec<SomeRtcpPacket>),
     RtcpSdesPacket(RtcpSdesPacket),
     RtcpByePacket(RtcpByePacket),
+    RtcpRrPacket(RtcpRrPacket),
 }
-pub struct RtcpPacket;
 
 pub fn parse_rtcp_packet(buf: &mut dyn ReadableBuf) -> RtpParseResult<SomeRtcpPacket> {
     let mut packets: Vec<SomeRtcpPacket> = Vec::new();
@@ -46,6 +47,7 @@ pub fn parse_single_rtcp_packet(buf: &mut dyn ReadableBuf) -> RtpParseResult<Som
                 buf, header,
             )?)),
             RtcpByePacket::PT => Ok(SomeRtcpPacket::RtcpByePacket(parse_rtcp_bye(header, buf)?)),
+            RtcpRrPacket::PT => Ok(SomeRtcpPacket::RtcpRrPacket(parse_rtcp_rr(header, buf)?)),
             pt @ _ => Err(Box::new(UnrecognizedPacketType(pt))),
         }
     })
