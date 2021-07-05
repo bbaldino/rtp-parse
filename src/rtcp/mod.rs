@@ -1,4 +1,7 @@
 pub mod rtcp_bye;
+pub mod rtcp_fb_header;
+pub mod rtcp_fb_nack;
+pub mod rtcp_fb_packet;
 pub mod rtcp_header;
 pub mod rtcp_packet;
 pub mod rtcp_report_block;

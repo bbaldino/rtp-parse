@@ -4,12 +4,19 @@ use packet_parsing::packet_parsing::try_parse_field;
 use crate::{
     error::{InvalidLengthValue, RtpParseResult, UnrecognizedPacketType},
     rtcp::rtcp_bye::{parse_rtcp_bye, RtcpByePacket},
-    rtcp::rtcp_header::{parse_rtcp_header, RtcpHeader},
     rtcp::rtcp_rr::{parse_rtcp_rr, RtcpRrPacket},
     rtcp::rtcp_sdes::{parse_rtcp_sdes, RtcpSdesPacket},
+    rtcp::{
+        rtcp_fb_header::parse_rtcp_fb_header,
+        rtcp_header::{parse_rtcp_header, RtcpHeader},
+    },
 };
 
-use super::rtcp_sr::{parse_rtcp_sr, RtcpSrPacket};
+use super::{
+    rtcp_fb_nack::{parse_rtcp_fb_nack, RtcpFbNackPacket},
+    rtcp_fb_packet::{RtcpFbPsPacket, RtcpFbTlPacket},
+    rtcp_sr::{parse_rtcp_sr, RtcpSrPacket},
+};
 
 pub enum SomeRtcpPacket {
     CompoundRtcpPacket(Vec<SomeRtcpPacket>),
@@ -17,6 +24,7 @@ pub enum SomeRtcpPacket {
     RtcpByePacket(RtcpByePacket),
     RtcpRrPacket(RtcpRrPacket),
     RtcpSrPacket(RtcpSrPacket),
+    RtcpFbNackPacket(RtcpFbNackPacket),
 }
 
 pub fn parse_rtcp_packet(buf: &mut dyn ReadableBuf) -> RtpParseResult<SomeRtcpPacket> {
@@ -52,6 +60,21 @@ pub fn parse_single_rtcp_packet(buf: &mut dyn ReadableBuf) -> RtpParseResult<Som
             RtcpByePacket::PT => Ok(SomeRtcpPacket::RtcpByePacket(parse_rtcp_bye(header, buf)?)),
             RtcpRrPacket::PT => Ok(SomeRtcpPacket::RtcpRrPacket(parse_rtcp_rr(header, buf)?)),
             RtcpSrPacket::PT => Ok(SomeRtcpPacket::RtcpSrPacket(parse_rtcp_sr(header, buf)?)),
+            RtcpFbPsPacket::PT => {
+                let rtcp_fb_header = parse_rtcp_fb_header(buf)?;
+                match header.report_count {
+                    _ => todo!(),
+                }
+            }
+            RtcpFbTlPacket::PT => {
+                let rtcp_fb_header = parse_rtcp_fb_header(buf)?;
+                match header.report_count {
+                    RtcpFbNackPacket::FMT => Ok(SomeRtcpPacket::RtcpFbNackPacket(
+                        parse_rtcp_fb_nack(header, rtcp_fb_header, buf)?,
+                    )),
+                    _ => todo!(),
+                }
+            }
             pt @ _ => Err(Box::new(UnrecognizedPacketType(pt))),
         }
     })
