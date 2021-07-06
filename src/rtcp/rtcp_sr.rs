@@ -5,7 +5,7 @@ use crate::error::RtpParseResult;
 
 use super::{
     rtcp_header::RtcpHeader,
-    rtcp_report_block::{parse_rtcp_report_block, parse_rtcp_report_blocks, RtcpReportBlock},
+    rtcp_report_block::{parse_rtcp_report_blocks, RtcpReportBlock},
     rtcp_sender_info::{parse_rtcp_sender_info, RtcpSenderInfo},
 };
 

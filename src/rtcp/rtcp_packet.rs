@@ -4,8 +4,11 @@ use packet_parsing::packet_parsing::try_parse_field;
 use crate::{
     error::{InvalidLengthValue, RtpParseResult, UnrecognizedPacketType},
     rtcp::rtcp_bye::{parse_rtcp_bye, RtcpByePacket},
-    rtcp::rtcp_rr::{parse_rtcp_rr, RtcpRrPacket},
     rtcp::rtcp_sdes::{parse_rtcp_sdes, RtcpSdesPacket},
+    rtcp::{
+        rtcp_fb_fir::parse_rtcp_fb_fir,
+        rtcp_rr::{parse_rtcp_rr, RtcpRrPacket},
+    },
     rtcp::{
         rtcp_fb_header::parse_rtcp_fb_header,
         rtcp_header::{parse_rtcp_header, RtcpHeader},
@@ -13,6 +16,7 @@ use crate::{
 };
 
 use super::{
+    rtcp_fb_fir::RtcpFbFirPacket,
     rtcp_fb_nack::{parse_rtcp_fb_nack, RtcpFbNackPacket},
     rtcp_fb_packet::{RtcpFbPsPacket, RtcpFbTlPacket},
     rtcp_sr::{parse_rtcp_sr, RtcpSrPacket},
@@ -25,6 +29,7 @@ pub enum SomeRtcpPacket {
     RtcpRrPacket(RtcpRrPacket),
     RtcpSrPacket(RtcpSrPacket),
     RtcpFbNackPacket(RtcpFbNackPacket),
+    RtcpFbFirPacket(RtcpFbFirPacket),
 }
 
 pub fn parse_rtcp_packet(buf: &mut dyn ReadableBuf) -> RtpParseResult<SomeRtcpPacket> {
@@ -63,6 +68,11 @@ pub fn parse_single_rtcp_packet(buf: &mut dyn ReadableBuf) -> RtpParseResult<Som
             RtcpFbPsPacket::PT => {
                 let rtcp_fb_header = parse_rtcp_fb_header(buf)?;
                 match header.report_count {
+                    RtcpFbFirPacket::FMT => Ok(SomeRtcpPacket::RtcpFbFirPacket(parse_rtcp_fb_fir(
+                        header,
+                        rtcp_fb_header,
+                        buf,
+                    )?)),
                     _ => todo!(),
                 }
             }
