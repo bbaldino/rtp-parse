@@ -6,6 +6,6 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-packet_parsing = { path = "../packet_parsing" }
+packet_parsing = { git = "https://github.com/bbaldino/packet-parsing" }
 bitbuffer = { git = "https://github.com/bbaldino/bitbuffer" }
 thiserror = "1.0"
