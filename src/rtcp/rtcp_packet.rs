@@ -6,6 +6,7 @@ use crate::{
     rtcp::rtcp_bye::{parse_rtcp_bye, RtcpByePacket},
     rtcp::{
         rtcp_fb_fir::parse_rtcp_fb_fir,
+        rtcp_fb_tcc::parse_rtcp_fb_tcc,
         rtcp_rr::{parse_rtcp_rr, RtcpRrPacket},
     },
     rtcp::{
@@ -23,6 +24,7 @@ use super::{
     rtcp_fb_nack::{parse_rtcp_fb_nack, RtcpFbNackPacket},
     rtcp_fb_packet::{RtcpFbPsPacket, RtcpFbTlPacket},
     rtcp_fb_pli::RtcpFbPliPacket,
+    rtcp_fb_tcc::RtcpFbTccPacket,
     rtcp_sr::{parse_rtcp_sr, RtcpSrPacket},
 };
 
@@ -35,6 +37,7 @@ pub enum SomeRtcpPacket {
     RtcpFbNackPacket(RtcpFbNackPacket),
     RtcpFbFirPacket(RtcpFbFirPacket),
     RtcpFbPliPacket(RtcpFbPliPacket),
+    RtcpFbTccPacket(RtcpFbTccPacket),
 }
 
 pub fn parse_rtcp_packet(buf: &mut dyn ReadableBuf) -> RtpParseResult<SomeRtcpPacket> {
@@ -92,6 +95,11 @@ pub fn parse_single_rtcp_packet(buf: &mut dyn ReadableBuf) -> RtpParseResult<Som
                     RtcpFbNackPacket::FMT => Ok(SomeRtcpPacket::RtcpFbNackPacket(
                         parse_rtcp_fb_nack(header, rtcp_fb_header, buf)?,
                     )),
+                    RtcpFbTccPacket::FMT => Ok(SomeRtcpPacket::RtcpFbTccPacket(parse_rtcp_fb_tcc(
+                        header,
+                        rtcp_fb_header,
+                        buf,
+                    )?)),
                     _ => todo!(),
                 }
             }
