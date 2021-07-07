@@ -1,5 +1,6 @@
 pub mod error;
 pub mod rtcp;
+pub mod util;
 
 #[cfg(test)]
 mod tests {
