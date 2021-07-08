@@ -69,7 +69,7 @@ pub fn parse_rtcp_report_block(buf: &mut dyn ReadableBuf) -> RtpParseResult<Rtcp
     Ok(RtcpReportBlock {
         ssrc: try_parse_field("ssrc", || buf.read_u32())?,
         fraction_lost: try_parse_field("fraction lost", || buf.read_u8())?,
-        cumulative_lost: try_parse_field("cumulative lost", || buf.read_u32())?,
+        cumulative_lost: try_parse_field("cumulative lost", || buf.read_u24())?,
         extended_highest_seq_num: try_parse_field("extended highest seq num", || buf.read_u32())?,
         interarrival_jitter: try_parse_field("interarrival jitter", || buf.read_u32())?,
         last_sr_timestamp: try_parse_field("last sr timestamp", || buf.read_u32())?,
