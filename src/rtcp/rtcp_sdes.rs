@@ -23,18 +23,20 @@ use crate::rtcp::rtcp_header::RtcpHeader;
 ///        |                           SDES items                          |
 ///        |                              ...                              |
 ///        +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
-
+#[derive(Debug)]
 pub enum SdesItem {
     Empty,
     Cname(String),
     Unknown { item_type: u8, data: Vec<u8> },
 }
 
+#[derive(Debug)]
 pub struct SdesChunk {
     pub ssrc: u32,
     pub sdes_item: SdesItem,
 }
 
+#[derive(Debug)]
 pub struct RtcpSdesPacket {
     pub header: RtcpHeader,
     pub chunks: Vec<SdesChunk>,

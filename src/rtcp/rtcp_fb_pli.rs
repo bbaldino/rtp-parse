@@ -12,7 +12,7 @@ use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader};
 ///
 /// PLI does not require parameters.  Therefore, the length field MUST be
 /// 2, and there MUST NOT be any Feedback Control Information.
-
+#[derive(Debug)]
 pub struct RtcpFbPliPacket {
     pub header: RtcpHeader,
     pub fb_header: RtcpFbHeader,
