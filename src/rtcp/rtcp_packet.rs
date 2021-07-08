@@ -28,6 +28,7 @@ use super::{
     rtcp_sr::{parse_rtcp_sr, RtcpSrPacket},
 };
 
+#[derive(Debug)]
 pub enum SomeRtcpPacket {
     CompoundRtcpPacket(Vec<SomeRtcpPacket>),
     RtcpSdesPacket(RtcpSdesPacket),
@@ -43,14 +44,17 @@ pub enum SomeRtcpPacket {
 pub fn parse_rtcp_packet(buf: &mut dyn ReadableBuf) -> RtpParseResult<SomeRtcpPacket> {
     let mut packets: Vec<SomeRtcpPacket> = Vec::new();
 
+    let mut packet_num = 1;
     while buf.bytes_remaining() > RtcpHeader::SIZE_BYTES {
-        match parse_single_rtcp_packet(buf) {
-            Ok(packet) => packets.push(packet),
-            Err(e) => return Err(e),
-        };
+        let packet = try_parse_field(format!("sub packet {}", packet_num).as_ref(), || {
+            parse_single_rtcp_packet(buf)
+        })?;
+        packets.push(packet);
+        packet_num += 1;
     }
+
     match packets.len() {
-        1 => todo!(),
+        1 => Ok(packets.remove(0)),
         _ => Ok(SomeRtcpPacket::CompoundRtcpPacket(packets)),
     }
 }
@@ -66,39 +70,50 @@ pub fn parse_single_rtcp_packet(buf: &mut dyn ReadableBuf) -> RtpParseResult<Som
                 buf_remaining_bytes: max_packet_size,
             }));
         }
+        let mut payload_buf = buf.sub_buffer(header.length_bytes() - RtcpHeader::SIZE_BYTES)?;
         match header.packet_type {
             RtcpSdesPacket::PT => Ok(SomeRtcpPacket::RtcpSdesPacket(parse_rtcp_sdes(
-                buf, header,
+                &mut payload_buf,
+                header,
             )?)),
-            RtcpByePacket::PT => Ok(SomeRtcpPacket::RtcpByePacket(parse_rtcp_bye(header, buf)?)),
-            RtcpRrPacket::PT => Ok(SomeRtcpPacket::RtcpRrPacket(parse_rtcp_rr(header, buf)?)),
-            RtcpSrPacket::PT => Ok(SomeRtcpPacket::RtcpSrPacket(parse_rtcp_sr(header, buf)?)),
+            RtcpByePacket::PT => Ok(SomeRtcpPacket::RtcpByePacket(parse_rtcp_bye(
+                header,
+                &mut payload_buf,
+            )?)),
+            RtcpRrPacket::PT => Ok(SomeRtcpPacket::RtcpRrPacket(parse_rtcp_rr(
+                header,
+                &mut payload_buf,
+            )?)),
+            RtcpSrPacket::PT => Ok(SomeRtcpPacket::RtcpSrPacket(parse_rtcp_sr(
+                header,
+                &mut payload_buf,
+            )?)),
             RtcpFbPsPacket::PT => {
-                let rtcp_fb_header = parse_rtcp_fb_header(buf)?;
+                let rtcp_fb_header = parse_rtcp_fb_header(&mut payload_buf)?;
                 match header.report_count {
                     RtcpFbPliPacket::FMT => Ok(SomeRtcpPacket::RtcpFbPliPacket(parse_rtcp_fb_pli(
                         header,
                         rtcp_fb_header,
-                        buf,
+                        &mut payload_buf,
                     )?)),
                     RtcpFbFirPacket::FMT => Ok(SomeRtcpPacket::RtcpFbFirPacket(parse_rtcp_fb_fir(
                         header,
                         rtcp_fb_header,
-                        buf,
+                        &mut payload_buf,
                     )?)),
                     _ => todo!(),
                 }
             }
             RtcpFbTlPacket::PT => {
-                let rtcp_fb_header = parse_rtcp_fb_header(buf)?;
+                let rtcp_fb_header = parse_rtcp_fb_header(&mut payload_buf)?;
                 match header.report_count {
                     RtcpFbNackPacket::FMT => Ok(SomeRtcpPacket::RtcpFbNackPacket(
-                        parse_rtcp_fb_nack(header, rtcp_fb_header, buf)?,
+                        parse_rtcp_fb_nack(header, rtcp_fb_header, &mut payload_buf)?,
                     )),
                     RtcpFbTccPacket::FMT => Ok(SomeRtcpPacket::RtcpFbTccPacket(parse_rtcp_fb_tcc(
                         header,
                         rtcp_fb_header,
-                        buf,
+                        &mut payload_buf,
                     )?)),
                     _ => todo!(),
                 }
