@@ -1,8 +1,6 @@
 use bitbuffer::readable_buf::ReadableBuf;
 use packet_parsing::{
-    error::{PacketParseResult, ValidationError, ValidationResult},
-    packet_parsing::try_parse_field,
-    validators::{RequireEqual, Validatable},
+    error::PacketParseResult, packet_parsing::try_parse_field, validators::RequireEqual,
 };
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.1
@@ -35,25 +33,13 @@ impl RtcpHeader {
     }
 }
 
-fn validate_packet_type(packet_type: &u8) -> ValidationResult {
-    match packet_type {
-        90..=120 => Ok(()),
-        _ => Err(ValidationError(format!(
-            "Expected value between 90 and 120, got {}",
-            packet_type
-        ))),
-    }
-}
-
 pub fn parse_rtcp_header(buf: &mut dyn ReadableBuf) -> PacketParseResult<RtcpHeader> {
     try_parse_field("rtcp header", || {
         Ok(RtcpHeader {
             version: try_parse_field("version", || buf.read_bits_as_u8(2)?.require_value(2))?,
             has_padding: try_parse_field("has_padding", || buf.read_bit_as_bool())?,
             report_count: try_parse_field("report count", || buf.read_bits_as_u8(5))?,
-            packet_type: try_parse_field("packet_type", || {
-                buf.read_u8()?.validate(validate_packet_type)
-            })?,
+            packet_type: try_parse_field("packet_type", || buf.read_u8())?,
             length_field: try_parse_field("length field", || buf.read_u16())?,
         })
     })
