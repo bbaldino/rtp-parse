@@ -1,9 +1,14 @@
 use std::str::from_utf8;
 
-use bitbuffer::readable_buf::ReadableBuf;
-use packet_parsing::packet_parsing::try_parse_field;
+use bytebuffer::sized_buffer::SizedByteBuffer;
+use byteorder::NetworkEndian;
 
-use crate::{error::RtpParseResult, rtcp::rtcp_header::RtcpHeader};
+use crate::{
+    error::RtpParseResult,
+    packet_buffer::PacketBuffer,
+    rtcp::rtcp_header::RtcpHeader,
+    with_context::{with_context, Context},
+};
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.6
 ///        0                   1                   2                   3
@@ -28,16 +33,17 @@ impl RtcpByePacket {
     pub const PT: u8 = 203;
 }
 
-pub fn parse_rtcp_bye(
+pub fn parse_rtcp_bye<B: PacketBuffer + SizedByteBuffer>(
     header: RtcpHeader,
-    buf: &mut dyn ReadableBuf,
+    buf: &mut B,
 ) -> RtpParseResult<RtcpByePacket> {
-    try_parse_field("rtcp bye", || {
-        let ssrcs = try_parse_field("ssrcs", || {
-            (0..header.report_count)
-                .map(|i| try_parse_field(format!("ssrc-{}", i).as_ref(), || buf.read_u32()))
-                .collect::<RtpParseResult<Vec<u32>>>()
-        })?;
+    with_context("rtcp bye", || {
+        let ssrcs = (0..header.report_count)
+            .map(|i| {
+                buf.read_u32::<NetworkEndian>()
+                    .with_context(format!("ssrc-{}", i).as_ref())
+            })
+            .collect::<RtpParseResult<Vec<u32>>>()?;
 
         if buf.bytes_remaining() == 0 {
             return Ok(RtcpByePacket {
@@ -47,10 +53,12 @@ pub fn parse_rtcp_bye(
             });
         }
 
-        let reason = try_parse_field("reason", || {
-            let reason_length = try_parse_field("reason length", || buf.read_u8())? as usize;
-            let reason_bytes = try_parse_field("reason bytes", || buf.read_bytes(reason_length))?;
-            match from_utf8(reason_bytes) {
+        let reason = with_context("reason", || {
+            let reason_length = buf.read_u8().with_context("reason_length")? as usize;
+            let mut reason_bytes = vec![0; reason_length];
+            buf.read_exact(&mut reason_bytes)
+                .with_context("reason bytes")?;
+            match from_utf8(&reason_bytes) {
                 Ok(s) => Ok(s.to_owned()),
                 Err(e) => Err(e.into()),
             }
@@ -66,7 +74,7 @@ pub fn parse_rtcp_bye(
 
 #[cfg(test)]
 mod tests {
-    use bitbuffer::bit_buffer::BitBuffer;
+    use bytebuffer::byte_buffer_cursor::ByteBufferCursor;
 
     use super::*;
 
@@ -92,7 +100,7 @@ mod tests {
         ];
         // add reason bytes
         payload.extend(reason_bytes.collect::<Vec<u8>>());
-        let mut buf = BitBuffer::new(payload);
+        let mut buf = ByteBufferCursor::new(payload);
         let rtcp_bye = parse_rtcp_bye(rtcp_header, &mut buf).unwrap();
         assert!(rtcp_bye.ssrcs.contains(&1u32));
         assert!(rtcp_bye.ssrcs.contains(&2u32));
@@ -113,7 +121,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x01, // ssrc 2
             0x00, 0x00, 0x00, 0x02,
         ];
-        let mut buf = BitBuffer::new(payload);
+        let mut buf = ByteBufferCursor::new(payload);
         let rtcp_bye = parse_rtcp_bye(rtcp_header, &mut buf).unwrap();
         assert!(rtcp_bye.ssrcs.contains(&1u32));
         assert!(rtcp_bye.ssrcs.contains(&2u32));
@@ -131,7 +139,7 @@ mod tests {
         };
 
         // Report count (source count) is 2 in header, but we'll just have 1 SSRC in the payload
-        let mut buf = BitBuffer::new(vec![1, 2, 3, 4]);
+        let mut buf = ByteBufferCursor::new(vec![1, 2, 3, 4]);
         let result = parse_rtcp_bye(rtcp_header, &mut buf);
         assert!(result.is_err());
     }
@@ -154,7 +162,7 @@ mod tests {
             // length 2, invalid utf 8
             0x02, 0xFF, 0xFF
         ];
-        let mut buf = BitBuffer::new(payload);
+        let mut buf = ByteBufferCursor::new(payload);
         let result = parse_rtcp_bye(rtcp_header, &mut buf);
         assert!(result.is_err());
     }

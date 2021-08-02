@@ -123,7 +123,7 @@ pub fn parse_sdes_item<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<SdesItem>
 
 #[cfg(test)]
 mod tests {
-    use bytebuffer::byte_buffer_cursor::ByteBufferCursor;
+    use bytebuffer::{byte_buffer_cursor::ByteBufferCursor, sized_buffer::SizedByteBuffer};
 
     use super::*;
 
