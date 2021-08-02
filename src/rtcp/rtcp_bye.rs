@@ -89,7 +89,7 @@ mod tests {
         };
         let reason_str = "goodbye";
         let reason_bytes = reason_str.bytes();
-        #[cfg_attr(rustfmt, rustfmt_skip)]
+        #[rustfmt::skip]
         let mut payload = vec![
             // ssrc 1
             0x00, 0x00, 0x00, 0x01, 
@@ -153,7 +153,7 @@ mod tests {
             packet_type: 203,
             length_field: 2,
         };
-        #[cfg_attr(rustfmt, rustfmt_skip)]
+        #[rustfmt::skip]
         let payload = vec![
             // ssrc 1
             0x00, 0x00, 0x00, 0x01,

@@ -100,7 +100,7 @@ pub fn parse_sdes_item<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<SdesItem>
         let id = buf.read_u8().with_context("id")?;
         match id {
             0 => Ok(SdesItem::Empty),
-            t @ _ => {
+            t => {
                 let length = buf.read_u8().with_context("length")? as usize;
                 let mut bytes = vec![0; length];
                 buf.read_exact(&mut bytes).with_context("item bytes")?;
@@ -111,7 +111,7 @@ pub fn parse_sdes_item<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<SdesItem>
                         Ok(s) => Ok(SdesItem::Cname(s.to_owned())),
                         Err(e) => Err(e.into()),
                     },
-                    t @ _ => Ok(SdesItem::Unknown {
+                    t => Ok(SdesItem::Unknown {
                         item_type: t,
                         data: bytes.to_vec(),
                     }),
