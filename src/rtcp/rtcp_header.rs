@@ -1,8 +1,8 @@
-use bytebuffer::bit_read::BitRead;
-use byteorder::{NetworkEndian, ReadBytesExt};
+use byteorder::NetworkEndian;
 
 use crate::{
     error::RtpParseResult,
+    packet_buffer::PacketBuffer,
     validators::RequireEqual,
     with_context::{with_context, Context},
 };
@@ -36,9 +36,6 @@ impl RtcpHeader {
         (self.length_field as usize + 1) * 4
     }
 }
-
-pub trait PacketBuffer: BitRead + ReadBytesExt {}
-impl<T> PacketBuffer for T where T: BitRead + ReadBytesExt {}
 
 pub fn parse_rtcp_header<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<RtcpHeader> {
     with_context("RTCP header", || {
