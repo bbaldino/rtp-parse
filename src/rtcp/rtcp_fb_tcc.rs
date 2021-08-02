@@ -336,7 +336,7 @@ fn parse_tcc_payload<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<Vec<PacketR
     let _reference_time = buf
         .read_u24::<NetworkEndian>()
         .with_context("reference time")?;
-    let _feedback_packet_count = buf.read_u8().with_context("feedback packet count")?;
+    let feedback_packet_count = buf.read_u8().with_context("feedback packet count")?;
 
     let mut num_status_remaining = packet_status_count as usize;
 
@@ -350,7 +350,7 @@ fn parse_tcc_payload<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<Vec<PacketR
     }
 
     let mut curr_seq_num = base_seq_num;
-    let mut packet_reports: Vec<PacketReport> = Vec::new();
+    let mut packet_reports: Vec<PacketReport> = Vec::with_capacity(feedback_packet_count as usize);
     for chunk in chunks {
         for symbol in chunk {
             match symbol.delta_size() {
