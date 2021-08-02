@@ -1,6 +1,5 @@
 use std::str::from_utf8;
 
-use bytebuffer::sized_buffer::SizedByteBuffer;
 use byteorder::NetworkEndian;
 
 use crate::{
@@ -33,7 +32,7 @@ impl RtcpByePacket {
     pub const PT: u8 = 203;
 }
 
-pub fn parse_rtcp_bye<B: PacketBuffer + SizedByteBuffer>(
+pub fn parse_rtcp_bye<B: PacketBuffer>(
     header: RtcpHeader,
     buf: &mut B,
 ) -> RtpParseResult<RtcpByePacket> {

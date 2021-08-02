@@ -1,4 +1,3 @@
-use bytebuffer::sized_buffer::SizedByteBuffer;
 use byteorder::NetworkEndian;
 
 use crate::{
@@ -27,7 +26,7 @@ impl RtcpFbNackPacket {
     pub const FMT: u8 = 1;
 }
 
-pub fn parse_rtcp_fb_nack<B: PacketBuffer + SizedByteBuffer>(
+pub fn parse_rtcp_fb_nack<B: PacketBuffer>(
     header: RtcpHeader,
     fb_header: RtcpFbHeader,
     buf: &mut B,

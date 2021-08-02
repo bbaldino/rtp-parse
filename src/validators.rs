@@ -6,6 +6,7 @@ use thiserror::Error;
 #[error("Validation error: {0}")]
 struct ValidationError(String);
 
+/// A 'validator' to allow validating the value of a field when parsing
 pub trait RequireEqual<T> {
     fn require_equal(self, expected: T) -> Result<T, Box<dyn std::error::Error>>;
 }
