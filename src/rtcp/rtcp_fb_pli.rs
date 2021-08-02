@@ -1,7 +1,7 @@
-use bitbuffer::readable_buf::ReadableBuf;
-use packet_parsing::{packet_parsing::try_parse_field, validators::RequireEqual};
-
-use crate::error::RtpParseResult;
+use crate::{
+    error::RtpParseResult, packet_buffer::PacketBuffer, validators::RequireEqual,
+    with_context::with_context,
+};
 
 use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader};
 
@@ -22,13 +22,13 @@ impl RtcpFbPliPacket {
     pub const FMT: u8 = 1;
 }
 
-pub fn parse_rtcp_fb_pli(
+pub fn parse_rtcp_fb_pli<B: PacketBuffer>(
     header: RtcpHeader,
     fb_header: RtcpFbHeader,
-    _buf: &mut dyn ReadableBuf,
+    _buf: &mut B,
 ) -> RtpParseResult<RtcpFbPliPacket> {
-    try_parse_field("rtcp fb pli", || {
-        header.length_field.require_value(2)?;
+    with_context("rtcp fb pli", || {
+        header.length_field.require_equal(2)?;
         Ok(RtcpFbPliPacket { header, fb_header })
     })
 }
