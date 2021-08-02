@@ -1,7 +1,10 @@
-use bitbuffer::readable_buf::ReadableBuf;
-use packet_parsing::packet_parsing::try_parse_field;
+use byteorder::NetworkEndian;
 
-use crate::error::RtpParseResult;
+use crate::{
+    error::RtpParseResult,
+    packet_buffer::PacketBuffer,
+    with_context::{with_context, Context},
+};
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.4.1
 ///         0                   1                   2                   3
@@ -50,29 +53,37 @@ pub struct RtcpReportBlock {
     pub delay_since_last_sr: u32,
 }
 
-pub fn parse_rtcp_report_blocks(
+pub fn parse_rtcp_report_blocks<B: PacketBuffer>(
     num_blocks: usize,
-    buf: &mut dyn ReadableBuf,
+    buf: &mut B,
 ) -> RtpParseResult<Vec<RtcpReportBlock>> {
-    try_parse_field("report blocks", || {
+    with_context("report blocks", || {
         (0..num_blocks)
             .map(|i| {
-                try_parse_field(format!("report block {}", i).as_ref(), || {
-                    parse_rtcp_report_block(buf)
-                })
+                parse_rtcp_report_block(buf).with_context(format!("report block{}", i).as_ref())
             })
             .collect::<RtpParseResult<Vec<RtcpReportBlock>>>()
     })
 }
 
-pub fn parse_rtcp_report_block(buf: &mut dyn ReadableBuf) -> RtpParseResult<RtcpReportBlock> {
+pub fn parse_rtcp_report_block<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<RtcpReportBlock> {
     Ok(RtcpReportBlock {
-        ssrc: try_parse_field("ssrc", || buf.read_u32())?,
-        fraction_lost: try_parse_field("fraction lost", || buf.read_u8())?,
-        cumulative_lost: try_parse_field("cumulative lost", || buf.read_u24())?,
-        extended_highest_seq_num: try_parse_field("extended highest seq num", || buf.read_u32())?,
-        interarrival_jitter: try_parse_field("interarrival jitter", || buf.read_u32())?,
-        last_sr_timestamp: try_parse_field("last sr timestamp", || buf.read_u32())?,
-        delay_since_last_sr: try_parse_field("delay since last sr", || buf.read_u32())?,
+        ssrc: buf.read_u32::<NetworkEndian>().with_context("ssrc")?,
+        fraction_lost: buf.read_u8().with_context("fraction lost")?,
+        cumulative_lost: buf
+            .read_u24::<NetworkEndian>()
+            .with_context("cumulative lost")?,
+        extended_highest_seq_num: buf
+            .read_u32::<NetworkEndian>()
+            .with_context("extended highest seq num")?,
+        interarrival_jitter: buf
+            .read_u32::<NetworkEndian>()
+            .with_context("interarrival jitter")?,
+        last_sr_timestamp: buf
+            .read_u32::<NetworkEndian>()
+            .with_context("last sr timestamp")?,
+        delay_since_last_sr: buf
+            .read_u32::<NetworkEndian>()
+            .with_context("delay since last SR")?,
     })
 }
