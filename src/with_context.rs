@@ -36,7 +36,7 @@ pub fn with_context<T, F: FnOnce() -> Result<T, Box<dyn std::error::Error>>>(
         Ok(v) => Ok(v),
         Err(e) => Err(Box::new(WrappedError {
             msg: context.to_owned(),
-            cause: e.into(),
+            cause: e,
         })),
     }
 }
