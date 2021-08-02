@@ -1,7 +1,11 @@
-use bitbuffer::readable_buf::ReadableBuf;
-use packet_parsing::packet_parsing::try_parse_field;
+use bytebuffer::sized_buffer::SizedByteBuffer;
+use byteorder::NetworkEndian;
 
-use crate::error::RtpParseResult;
+use crate::{
+    error::RtpParseResult,
+    packet_buffer::PacketBuffer,
+    with_context::{with_context, Context},
+};
 
 use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader};
 
@@ -23,12 +27,12 @@ impl RtcpFbNackPacket {
     pub const FMT: u8 = 1;
 }
 
-pub fn parse_rtcp_fb_nack(
+pub fn parse_rtcp_fb_nack<B: PacketBuffer + SizedByteBuffer>(
     header: RtcpHeader,
     fb_header: RtcpFbHeader,
-    buf: &mut dyn ReadableBuf,
+    buf: &mut B,
 ) -> RtpParseResult<RtcpFbNackPacket> {
-    try_parse_field("rtcp fb nack payload", || {
+    with_context("rtcp fb nack payload", || {
         let mut missing_seq_nums = Vec::<u16>::new();
         while buf.bytes_remaining() >= NackBlock::SIZE_BYTES {
             missing_seq_nums.extend(parse_nack_block(buf)?.missing_seq_nums);
@@ -49,10 +53,10 @@ impl NackBlock {
     pub const SIZE_BYTES: usize = 2;
 }
 
-fn parse_nack_block(buf: &mut dyn ReadableBuf) -> RtpParseResult<NackBlock> {
-    try_parse_field("nack block", || {
-        let packet_id = try_parse_field("packet id", || buf.read_u16())?;
-        let blp = try_parse_field("blp", || buf.read_u16())?;
+fn parse_nack_block<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<NackBlock> {
+    with_context("nack block", || {
+        let packet_id = buf.read_u16::<NetworkEndian>().with_context("packet id")?;
+        let blp = buf.read_u16::<NetworkEndian>().with_context("blp")?;
         Ok(NackBlock {
             missing_seq_nums: parse_missing_seq_nums(packet_id, blp),
         })
