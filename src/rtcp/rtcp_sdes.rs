@@ -89,12 +89,11 @@ pub fn parse_rtcp_sdes_items<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<Vec
     Ok(sdes_items)
 }
 
-///
-///    0                   1                   2                   3
-///    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-///    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///    |      ID       |     length    | value                       ...
-///    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// 0                   1                   2                   3
+/// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |      ID       |     length    | value                       ...
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 pub fn parse_sdes_item<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<SdesItem> {
     with_context("sdes item", || {
         let id = buf.read_u8().with_context("id")?;

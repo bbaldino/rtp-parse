@@ -1,10 +1,13 @@
-use bitbuffer::readable_buf::ReadableBuf;
+use byteorder::NetworkEndian;
 use std::convert::{TryFrom, TryInto};
 use thiserror::Error;
 
-use packet_parsing::{error::PacketParseResult, packet_parsing::try_parse_field};
-
-use crate::{error::RtpParseResult, util::consume_padding};
+use crate::{
+    error::RtpParseResult,
+    packet_buffer::PacketBuffer,
+    util::consume_padding,
+    with_context::{with_context, Context},
+};
 
 use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader};
 
@@ -238,7 +241,7 @@ fn parse_status_vector_chunk_from_u16(
 fn parse_packet_status_chunk_from_u16(
     data: u16,
     max_symbol_count: usize,
-) -> PacketParseResult<SomePacketStatusChunk> {
+) -> RtpParseResult<SomePacketStatusChunk> {
     let chunk_type = (data & 0x8000) >> 15;
     match chunk_type {
         0 => {
@@ -308,12 +311,12 @@ pub struct RtcpFbTccPacket {
 impl RtcpFbTccPacket {
     pub const FMT: u8 = 15;
 }
-pub fn parse_rtcp_fb_tcc(
+pub fn parse_rtcp_fb_tcc<B: PacketBuffer>(
     header: RtcpHeader,
     fb_header: RtcpFbHeader,
-    buf: &mut dyn ReadableBuf,
+    buf: &mut B,
 ) -> RtpParseResult<RtcpFbTccPacket> {
-    try_parse_field("rtcp fb tcc", || {
+    with_context("rtcp fb tcc", || {
         let packet_reports = parse_tcc_payload(buf)?;
         Ok(RtcpFbTccPacket {
             header,
@@ -323,18 +326,24 @@ pub fn parse_rtcp_fb_tcc(
     })
 }
 
-fn parse_tcc_payload(buf: &mut dyn ReadableBuf) -> RtpParseResult<Vec<PacketReport>> {
-    let base_seq_num = try_parse_field("base seq num", || buf.read_u16())?;
-    let packet_status_count = try_parse_field("packet status count", || buf.read_u16())? as usize;
-    let _reference_time = try_parse_field("reference time", || buf.read_u24())?;
-    let _feedback_packet_count = try_parse_field("feedback packet count", || buf.read_u8())?;
+fn parse_tcc_payload<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<Vec<PacketReport>> {
+    let base_seq_num = buf
+        .read_u16::<NetworkEndian>()
+        .with_context("base seq num")?;
+    let packet_status_count = buf
+        .read_u16::<NetworkEndian>()
+        .with_context("packet status count")? as usize;
+    let _reference_time = buf
+        .read_u24::<NetworkEndian>()
+        .with_context("reference time")?;
+    let _feedback_packet_count = buf.read_u8().with_context("feedback packet count")?;
 
     let mut num_status_remaining = packet_status_count as usize;
 
     // while there are still statuses to be parsed, parse the next packet chunk
     let mut chunks: Vec<SomePacketStatusChunk> = Vec::with_capacity(packet_status_count as usize);
     while num_status_remaining > 0 {
-        let chunk_data = buf.read_u16()?;
+        let chunk_data = buf.read_u16::<NetworkEndian>().with_context("chunk data")?;
         let chunk = parse_packet_status_chunk_from_u16(chunk_data, num_status_remaining)?;
         num_status_remaining -= chunk.num_status_symbols();
         chunks.push(chunk);
@@ -354,7 +363,9 @@ fn parse_tcc_payload(buf: &mut dyn ReadableBuf) -> RtpParseResult<Vec<PacketRepo
                 }),
                 2 => packet_reports.push(ReceivedPacketLargeOrNegativeDelta {
                     seq_num: curr_seq_num,
-                    delta_ticks: buf.read_u16()? as i16,
+                    delta_ticks: buf
+                        .read_u16::<NetworkEndian>()
+                        .with_context("delta ticks")? as i16,
                 }),
                 s @ _ => unreachable!("Got a TCC delta size of {}", s),
             };
@@ -368,7 +379,7 @@ fn parse_tcc_payload(buf: &mut dyn ReadableBuf) -> RtpParseResult<Vec<PacketRepo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitbuffer::bit_buffer::BitBuffer;
+    use bytebuffer::{byte_buffer_cursor::ByteBufferCursor, sized_buffer::SizedByteBuffer};
     use PacketStatusSymbol::{NotReceived, ReceivedLargeOrNegativeDelta, ReceivedSmallDelta};
 
     #[test]
@@ -465,7 +476,7 @@ mod tests {
             // Recv delta padding
             0x00
         ];
-        let mut buf = BitBuffer::new(data);
+        let mut buf = ByteBufferCursor::new(data);
         let tcc = parse_tcc_payload(&mut buf).unwrap();
         assert_eq!(tcc.len(), 9);
 
