@@ -1,11 +1,11 @@
 use std::str::from_utf8;
 
-use bitbuffer::readable_buf::ReadableBuf;
-use packet_parsing::error::PacketParseResult;
-use packet_parsing::packet_parsing::try_parse_field;
+use byteorder::NetworkEndian;
 
 use crate::error::RtpParseResult;
+use crate::packet_buffer::PacketBuffer;
 use crate::rtcp::rtcp_header::RtcpHeader;
+use crate::with_context::{with_context, Context};
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.5
 ///         0                   1                   2                   3
@@ -46,11 +46,11 @@ impl RtcpSdesPacket {
     pub const PT: u8 = 202;
 }
 
-pub fn parse_rtcp_sdes(
-    buf: &mut dyn ReadableBuf,
+pub fn parse_rtcp_sdes<B: PacketBuffer>(
+    buf: &mut B,
     header: RtcpHeader,
-) -> PacketParseResult<RtcpSdesPacket> {
-    try_parse_field("rtcp sdes", || {
+) -> RtpParseResult<RtcpSdesPacket> {
+    with_context("rtcp sdes", || {
         let num_chunks = header.report_count as usize;
         Ok(RtcpSdesPacket {
             header,
@@ -59,25 +59,25 @@ pub fn parse_rtcp_sdes(
     })
 }
 
-pub fn parse_sdes_chunks(
-    buf: &mut dyn ReadableBuf,
+pub fn parse_sdes_chunks<B: PacketBuffer>(
+    buf: &mut B,
     num_chunks: usize,
-) -> PacketParseResult<Vec<SdesChunk>> {
+) -> RtpParseResult<Vec<SdesChunk>> {
     (0..num_chunks)
         .map(|_| parse_sdes_chunk(buf))
         .collect::<RtpParseResult<Vec<SdesChunk>>>()
 }
 
-pub fn parse_sdes_chunk(buf: &mut dyn ReadableBuf) -> PacketParseResult<SdesChunk> {
-    try_parse_field("sdes chunk", || {
+pub fn parse_sdes_chunk<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<SdesChunk> {
+    with_context("sdes chunk", || {
         Ok(SdesChunk {
-            ssrc: try_parse_field("ssrc", || buf.read_u32())?,
+            ssrc: buf.read_u32::<NetworkEndian>().with_context("ssrc")?,
             sdes_item: parse_sdes_item(buf)?,
         })
     })
 }
 
-pub fn parse_rtcp_sdes_items(buf: &mut dyn ReadableBuf) -> RtpParseResult<Vec<SdesItem>> {
+pub fn parse_rtcp_sdes_items<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<Vec<SdesItem>> {
     let mut sdes_items: Vec<SdesItem> = Vec::new();
     loop {
         match parse_sdes_item(buf) {
@@ -95,18 +95,19 @@ pub fn parse_rtcp_sdes_items(buf: &mut dyn ReadableBuf) -> RtpParseResult<Vec<Sd
 ///    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///    |      ID       |     length    | value                       ...
 ///    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-pub fn parse_sdes_item(buf: &mut dyn ReadableBuf) -> RtpParseResult<SdesItem> {
-    try_parse_field("sdes item", || {
-        let id = try_parse_field("id", || buf.read_u8())?;
+pub fn parse_sdes_item<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<SdesItem> {
+    with_context("sdes item", || {
+        let id = buf.read_u8().with_context("id")?;
         match id {
             0 => Ok(SdesItem::Empty),
             t @ _ => {
-                let length = try_parse_field("length", || buf.read_u8())?;
-                let bytes = try_parse_field("data", || buf.read_bytes(length as usize))?;
+                let length = buf.read_u8().with_context("length")? as usize;
+                let mut bytes = vec![0; length];
+                buf.read_exact(&mut bytes).with_context("item bytes")?;
 
                 // Now parse the payload according to the actual SDES item type
                 match t {
-                    1 => match from_utf8(bytes) {
+                    1 => match from_utf8(&bytes) {
                         Ok(s) => Ok(SdesItem::Cname(s.to_owned())),
                         Err(e) => Err(e.into()),
                     },
@@ -122,18 +123,24 @@ pub fn parse_sdes_item(buf: &mut dyn ReadableBuf) -> RtpParseResult<SdesItem> {
 
 #[cfg(test)]
 mod tests {
-    use bitbuffer::bit_buffer::BitBuffer;
+    use bytebuffer::byte_buffer_cursor::ByteBufferCursor;
 
     use super::*;
 
-    #[test]
-    fn test_parse_sdes_item_success() {
-        let str = "hello, world!";
+    fn create_cname_item_bytes(str: &str) -> Vec<u8> {
         let data = str.bytes();
         let mut item_data = vec![0x1, data.len() as u8];
         item_data.extend(data.collect::<Vec<u8>>());
 
-        let mut buf = BitBuffer::new(item_data);
+        item_data
+    }
+
+    #[test]
+    fn test_parse_sdes_item_success() {
+        let str = "hello, world!";
+        let item_data = create_cname_item_bytes(str);
+
+        let mut buf = ByteBufferCursor::new(item_data);
         let sdes_item = parse_sdes_item(&mut buf).unwrap();
         match sdes_item {
             SdesItem::Cname(v) => assert_eq!(v, str),
@@ -147,13 +154,27 @@ mod tests {
         let mut item_data = vec![0x1, data.len() as u8];
         item_data.extend(data);
 
-        let mut buf = BitBuffer::new(item_data);
+        let mut buf = ByteBufferCursor::new(item_data);
         let res = parse_sdes_item(&mut buf);
         assert!(res.is_err());
     }
 
+    #[test]
+    fn test_parse_sdes_items() {
+        let str = "hello, world!";
+        let item_1 = create_cname_item_bytes(str);
+        let item_2 = vec![0]; // Empty item
+        let mut items: Vec<u8> = vec![];
+        items.extend(item_1);
+        items.extend(item_2);
+
+        let mut buf = ByteBufferCursor::new(items);
+        let sdes_items = parse_rtcp_sdes_items(&mut buf).unwrap();
+        assert_eq!(sdes_items.len(), 1);
+        assert_eq!(buf.bytes_remaining(), 0);
+    }
+
     // TODO:
-    // parse_sdes_items (make sure we stop when seeing empty, correctly parse to end of buffer
     // parse_sdes_chunk success | failure in chunk | failure in item
     // parse_sdes_chunks
     // parse_rtcp_sdes success | failure in chunk
