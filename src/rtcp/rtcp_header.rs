@@ -1,6 +1,10 @@
-use bitbuffer::readable_buf::ReadableBuf;
-use packet_parsing::{
-    error::PacketParseResult, packet_parsing::try_parse_field, validators::RequireEqual,
+use bytebuffer::bit_read::BitRead;
+use byteorder::{NetworkEndian, ReadBytesExt};
+
+use crate::{
+    error::RtpParseResult,
+    validators::RequireEqual,
+    with_context::{with_context, Context},
 };
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.1
@@ -33,32 +37,46 @@ impl RtcpHeader {
     }
 }
 
-pub fn parse_rtcp_header(buf: &mut dyn ReadableBuf) -> PacketParseResult<RtcpHeader> {
-    try_parse_field("rtcp header", || {
+pub trait PacketBuffer: BitRead + ReadBytesExt {}
+impl<T> PacketBuffer for T where T: BitRead + ReadBytesExt {}
+
+pub fn parse_rtcp_header<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<RtcpHeader> {
+    with_context("RTCP header", || {
         Ok(RtcpHeader {
-            version: try_parse_field("version", || buf.read_bits_as_u8(2)?.require_value(2))?,
-            has_padding: try_parse_field("has_padding", || buf.read_bit_as_bool())?,
-            report_count: try_parse_field("report count", || buf.read_bits_as_u8(5))?,
-            packet_type: try_parse_field("packet_type", || buf.read_u8())?,
-            length_field: try_parse_field("length field", || buf.read_u16())?,
+            version: buf
+                .read_bits_as_u8(2)
+                .require_equal(2)
+                .with_context("version")?,
+            has_padding: buf.read_bit_as_bool().with_context("has_padding")?,
+            report_count: buf.read_bits_as_u8(5).with_context("report count")?,
+            packet_type: buf.read_u8().with_context("packet type")?,
+            length_field: buf
+                .read_u16::<NetworkEndian>()
+                .with_context("length field")?,
         })
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use bitbuffer::bit_buffer::BitBuffer;
+    use bytebuffer::byte_buffer_cursor::ByteBufferCursor;
 
-    use super::*;
+    use crate::rtcp::rtcp_header::parse_rtcp_header;
 
     #[test]
     fn test_parse_rtcp_header() {
         let data: Vec<u8> = vec![0b10_1_00011, 89, 0x00, 0x05];
 
-        let mut buf = BitBuffer::new(data);
+        let mut buf = ByteBufferCursor::new(data);
 
-        if let Err(e) = parse_rtcp_header(&mut buf) {
-            println!("{}", e);
-        }
+        let res = parse_rtcp_header(&mut buf);
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert_eq!(res.version, 2);
+        assert_eq!(res.has_padding, true);
+        assert_eq!(res.report_count, 3);
+        assert_eq!(res.packet_type, 89);
+        assert_eq!(res.length_field, 5);
+        assert_eq!(res.length_bytes(), 24);
     }
 }
