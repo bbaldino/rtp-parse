@@ -40,7 +40,7 @@ pub fn parse_rtcp_bye<B: PacketBuffer>(
         let ssrcs = (0..header.report_count)
             .map(|i| {
                 buf.read_u32::<NetworkEndian>()
-                    .with_context(format!("ssrc-{}", i).as_ref())
+                    .with_context(format!("ssrc-{}", i))
             })
             .collect::<RtpParseResult<Vec<u32>>>()?;
 

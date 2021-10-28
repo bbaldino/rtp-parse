@@ -9,18 +9,18 @@ pub struct WrappedError {
 }
 
 pub trait Context<T, E> {
-    fn with_context(self, context: &str) -> Result<T, Box<dyn Error>>;
+    fn with_context<S: Into<String>>(self, context: S) -> Result<T, Box<dyn Error>>;
 }
 
 impl<T, E> Context<T, WrappedError> for Result<T, E>
 where
     E: Into<Box<dyn Error>>,
 {
-    fn with_context(self, context: &str) -> Result<T, Box<dyn Error>> {
+    fn with_context<S: Into<String>>(self, context: S) -> Result<T, Box<dyn Error>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(WrappedError {
-                msg: context.to_owned(),
+                msg: context.into(),
                 cause: e.into(),
             }
             .into()),
@@ -28,14 +28,14 @@ where
     }
 }
 
-pub fn with_context<T, F: FnOnce() -> Result<T, Box<dyn std::error::Error>>>(
-    context: &str,
+pub fn with_context<T, F: FnOnce() -> Result<T, Box<dyn std::error::Error>>, S: Into<String>>(
+    context: S,
     block: F,
 ) -> Result<T, Box<dyn std::error::Error>> {
     match block() {
         Ok(v) => Ok(v),
         Err(e) => Err(Box::new(WrappedError {
-            msg: context.to_owned(),
+            msg: context.into(),
             cause: e,
         })),
     }

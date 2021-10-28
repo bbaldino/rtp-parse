@@ -45,8 +45,8 @@ pub fn parse_rtcp_packet<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<SomeRtc
 
     let mut packet_num = 1;
     while buf.bytes_remaining() > RtcpHeader::SIZE_BYTES {
-        let packet = parse_single_rtcp_packet(buf)
-            .with_context(format!("sub packet {}", packet_num).as_ref())?;
+        let packet =
+            parse_single_rtcp_packet(buf).with_context(format!("sub packet {}", packet_num))?;
         packets.push(packet);
         packet_num += 1;
     }

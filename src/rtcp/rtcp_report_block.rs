@@ -63,9 +63,7 @@ pub fn parse_rtcp_report_blocks<B: PacketBuffer>(
 ) -> RtpParseResult<RtcpReportBlocks> {
     with_context("report blocks", || {
         (0..num_blocks)
-            .map(|i| {
-                parse_rtcp_report_block(buf).with_context(format!("report block{}", i).as_ref())
-            })
+            .map(|i| parse_rtcp_report_block(buf).with_context(format!("report block{}", i)))
             .collect::<RtpParseResult<Vec<RtcpReportBlock>>>()
             .map(|blocks| RtcpReportBlocks(blocks))
     })
