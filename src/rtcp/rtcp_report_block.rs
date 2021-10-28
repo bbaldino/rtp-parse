@@ -53,16 +53,21 @@ pub struct RtcpReportBlock {
     pub delay_since_last_sr: u32,
 }
 
+impl RtcpReportBlock {
+    pub const SIZE_BYTES: usize = 24;
+}
+
 pub fn parse_rtcp_report_blocks<B: PacketBuffer>(
     num_blocks: usize,
     buf: &mut B,
-) -> RtpParseResult<Vec<RtcpReportBlock>> {
+) -> RtpParseResult<RtcpReportBlocks> {
     with_context("report blocks", || {
         (0..num_blocks)
             .map(|i| {
                 parse_rtcp_report_block(buf).with_context(format!("report block{}", i).as_ref())
             })
             .collect::<RtpParseResult<Vec<RtcpReportBlock>>>()
+            .map(|blocks| RtcpReportBlocks(blocks))
     })
 }
 
@@ -86,4 +91,13 @@ pub fn parse_rtcp_report_block<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<R
             .read_u32::<NetworkEndian>()
             .with_context("delay since last SR")?,
     })
+}
+
+#[derive(Debug)]
+pub struct RtcpReportBlocks(Vec<RtcpReportBlock>);
+
+impl RtcpReportBlocks {
+    pub fn size_bytes(&self) -> usize {
+        return self.0.len() * RtcpReportBlock::SIZE_BYTES;
+    }
 }

@@ -8,7 +8,7 @@ use crate::{
 
 use super::{
     rtcp_header::RtcpHeader,
-    rtcp_report_block::{parse_rtcp_report_blocks, RtcpReportBlock},
+    rtcp_report_block::{parse_rtcp_report_blocks, RtcpReportBlocks},
 };
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.4.2
@@ -42,7 +42,7 @@ use super::{
 pub struct RtcpRrPacket {
     pub header: RtcpHeader,
     pub sender_ssrc: u32,
-    pub report_blocks: Vec<RtcpReportBlock>,
+    pub report_blocks: RtcpReportBlocks,
 }
 
 impl RtcpRrPacket {
