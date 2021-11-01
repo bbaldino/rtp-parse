@@ -1,10 +1,7 @@
+use anyhow::{Context, Result};
 use byteorder::NetworkEndian;
 
-use crate::{
-    error::RtpParseResult,
-    packet_buffer::PacketBuffer,
-    with_context::{with_context, Context},
-};
+use crate::packet_buffer::PacketBuffer;
 
 use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader};
 
@@ -30,17 +27,19 @@ pub fn parse_rtcp_fb_nack<B: PacketBuffer>(
     header: RtcpHeader,
     fb_header: RtcpFbHeader,
     buf: &mut B,
-) -> RtpParseResult<RtcpFbNackPacket> {
-    with_context("rtcp fb nack payload", || {
-        let mut missing_seq_nums = Vec::<u16>::new();
-        while buf.bytes_remaining() >= NackBlock::SIZE_BYTES {
-            missing_seq_nums.extend(parse_nack_block(buf)?.missing_seq_nums);
-        }
-        Ok(RtcpFbNackPacket {
-            header,
-            fb_header,
-            missing_seq_nums,
-        })
+) -> Result<RtcpFbNackPacket> {
+    let mut missing_seq_nums = Vec::<u16>::new();
+    while buf.bytes_remaining() >= NackBlock::SIZE_BYTES {
+        missing_seq_nums.extend(
+            parse_nack_block(buf)
+                .context("nack block")?
+                .missing_seq_nums,
+        );
+    }
+    Ok(RtcpFbNackPacket {
+        header,
+        fb_header,
+        missing_seq_nums,
     })
 }
 
@@ -52,13 +51,11 @@ impl NackBlock {
     pub const SIZE_BYTES: usize = 2;
 }
 
-fn parse_nack_block<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<NackBlock> {
-    with_context("nack block", || {
-        let packet_id = buf.read_u16::<NetworkEndian>().with_context("packet id")?;
-        let blp = buf.read_u16::<NetworkEndian>().with_context("blp")?;
-        Ok(NackBlock {
-            missing_seq_nums: parse_missing_seq_nums(packet_id, blp),
-        })
+fn parse_nack_block<B: PacketBuffer>(buf: &mut B) -> Result<NackBlock> {
+    let packet_id = buf.read_u16::<NetworkEndian>().context("packet id")?;
+    let blp = buf.read_u16::<NetworkEndian>().context("blp")?;
+    Ok(NackBlock {
+        missing_seq_nums: parse_missing_seq_nums(packet_id, blp),
     })
 }
 

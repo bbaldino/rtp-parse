@@ -1,13 +1,9 @@
+use anyhow::{Context, Result};
 use byteorder::NetworkEndian;
 use std::convert::{TryFrom, TryInto};
 use thiserror::Error;
 
-use crate::{
-    error::RtpParseResult,
-    packet_buffer::PacketBuffer,
-    util::consume_padding,
-    with_context::{with_context, Context},
-};
+use crate::{packet_buffer::PacketBuffer, util::consume_padding};
 
 use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader};
 
@@ -42,13 +38,13 @@ impl PacketStatusSymbol {
 }
 
 impl TryFrom<u8> for PacketStatusSymbol {
-    type Error = Box<dyn std::error::Error>;
-    fn try_from(value: u8) -> Result<Self, Box<dyn std::error::Error>> {
+    type Error = anyhow::Error;
+    fn try_from(value: u8) -> Result<Self, anyhow::Error> {
         match value {
             0 => Ok(NotReceived),
             1 => Ok(ReceivedSmallDelta),
             2 => Ok(ReceivedLargeOrNegativeDelta),
-            s @ _ => Err(Box::new(InvalidPacketStatusSymbol(s))),
+            s @ _ => Err(InvalidPacketStatusSymbol(s).into()),
         }
     }
 }
@@ -169,7 +165,7 @@ impl PacketStatusChunk for SomePacketStatusChunk {
 ///
 /// run length (L):  13 bits An unsigned integer denoting the run length.
 /// ```
-fn parse_run_length_packet_status_chunk_from_u16(chunk: u16) -> RtpParseResult<RleChunk> {
+fn parse_run_length_packet_status_chunk_from_u16(chunk: u16) -> Result<RleChunk> {
     let symbol: PacketStatusSymbol = (((chunk & 0b01100000_00000000) >> 13) as u8).try_into()?;
     let run_length = (chunk & 0b00011111_11111111) as usize;
     Ok(RleChunk { symbol, run_length })
@@ -198,10 +194,7 @@ fn parse_run_length_packet_status_chunk_from_u16(chunk: u16) -> RtpParseResult<R
 /// symbol list:  14 bits A list of packet status symbols, 7 or 14 in
 ///             total.
 /// ```
-fn parse_status_vector_chunk_from_u16(
-    chunk: u16,
-    max_symbol_count: usize,
-) -> RtpParseResult<SvChunk> {
+fn parse_status_vector_chunk_from_u16(chunk: u16, max_symbol_count: usize) -> Result<SvChunk> {
     let mut chunk = chunk;
     let symbol_size = (chunk & 0b01000000_00000000) >> 14;
     let mut symbols = match symbol_size {
@@ -231,7 +224,7 @@ fn parse_status_vector_chunk_from_u16(
             }
             symbols
         }
-        s @ _ => return Err(Box::new(InvalidSymbolSize(s as u8))),
+        s @ _ => return Err(InvalidSymbolSize(s as u8).into()),
     };
     // Now truncate the symbols to size, if needed
     symbols.truncate(max_symbol_count);
@@ -241,19 +234,19 @@ fn parse_status_vector_chunk_from_u16(
 fn parse_packet_status_chunk_from_u16(
     data: u16,
     max_symbol_count: usize,
-) -> RtpParseResult<SomePacketStatusChunk> {
+) -> Result<SomePacketStatusChunk> {
     let chunk_type = (data & 0x8000) >> 15;
     match chunk_type {
         0 => {
             // rle
             Ok(SomePacketStatusChunk::RleChunk(
-                parse_run_length_packet_status_chunk_from_u16(data)?,
+                parse_run_length_packet_status_chunk_from_u16(data).context("rle chunk")?,
             ))
         }
         1 => {
             // sv
             Ok(SomePacketStatusChunk::SvChunk(
-                parse_status_vector_chunk_from_u16(data, max_symbol_count)?,
+                parse_status_vector_chunk_from_u16(data, max_symbol_count).context("sv chunk")?,
             ))
         }
         _ => todo!(),
@@ -315,35 +308,29 @@ pub fn parse_rtcp_fb_tcc<B: PacketBuffer>(
     header: RtcpHeader,
     fb_header: RtcpFbHeader,
     buf: &mut B,
-) -> RtpParseResult<RtcpFbTccPacket> {
-    with_context("rtcp fb tcc", || {
-        let packet_reports = parse_tcc_payload(buf)?;
-        Ok(RtcpFbTccPacket {
-            header,
-            fb_header,
-            packet_reports,
-        })
+) -> Result<RtcpFbTccPacket> {
+    let packet_reports = parse_tcc_payload(buf)?;
+    Ok(RtcpFbTccPacket {
+        header,
+        fb_header,
+        packet_reports,
     })
 }
 
-fn parse_tcc_payload<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<Vec<PacketReport>> {
-    let base_seq_num = buf
-        .read_u16::<NetworkEndian>()
-        .with_context("base seq num")?;
+fn parse_tcc_payload<B: PacketBuffer>(buf: &mut B) -> Result<Vec<PacketReport>> {
+    let base_seq_num = buf.read_u16::<NetworkEndian>().context("base seq num")?;
     let packet_status_count = buf
         .read_u16::<NetworkEndian>()
-        .with_context("packet status count")? as usize;
-    let _reference_time = buf
-        .read_u24::<NetworkEndian>()
-        .with_context("reference time")?;
-    let feedback_packet_count = buf.read_u8().with_context("feedback packet count")?;
+        .context("packet status count")? as usize;
+    let _reference_time = buf.read_u24::<NetworkEndian>().context("reference time")?;
+    let feedback_packet_count = buf.read_u8().context("feedback packet count")?;
 
     let mut num_status_remaining = packet_status_count as usize;
 
     // while there are still statuses to be parsed, parse the next packet chunk
     let mut chunks: Vec<SomePacketStatusChunk> = Vec::with_capacity(packet_status_count as usize);
     while num_status_remaining > 0 {
-        let chunk_data = buf.read_u16::<NetworkEndian>().with_context("chunk data")?;
+        let chunk_data = buf.read_u16::<NetworkEndian>().context("chunk data")?;
         let chunk = parse_packet_status_chunk_from_u16(chunk_data, num_status_remaining)?;
         num_status_remaining -= chunk.num_status_symbols();
         chunks.push(chunk);
@@ -363,9 +350,7 @@ fn parse_tcc_payload<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<Vec<PacketR
                 }),
                 2 => packet_reports.push(ReceivedPacketLargeOrNegativeDelta {
                     seq_num: curr_seq_num,
-                    delta_ticks: buf
-                        .read_u16::<NetworkEndian>()
-                        .with_context("delta ticks")? as i16,
+                    delta_ticks: buf.read_u16::<NetworkEndian>().context("delta ticks")? as i16,
                 }),
                 s @ _ => unreachable!("Got a TCC delta size of {}", s),
             };

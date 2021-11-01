@@ -1,10 +1,7 @@
+use anyhow::{Context, Result};
 use byteorder::NetworkEndian;
 
-use crate::{
-    error::RtpParseResult,
-    packet_buffer::PacketBuffer,
-    with_context::{with_context, Context},
-};
+use crate::packet_buffer::PacketBuffer;
 
 use super::{
     rtcp_header::RtcpHeader,
@@ -60,19 +57,12 @@ impl RtcpSrPacket {
     pub const PT: u8 = 200;
 }
 
-pub fn parse_rtcp_sr<B: PacketBuffer>(
-    header: RtcpHeader,
-    buf: &mut B,
-) -> RtpParseResult<RtcpSrPacket> {
-    with_context("rtcp sr", || {
-        let num_report_blocks = header.report_count as usize;
-        Ok(RtcpSrPacket {
-            header,
-            sender_ssrc: buf
-                .read_u32::<NetworkEndian>()
-                .with_context("sender ssrc")?,
-            sender_info: parse_rtcp_sender_info(buf)?,
-            report_blocks: parse_rtcp_report_blocks(num_report_blocks, buf)?,
-        })
+pub fn parse_rtcp_sr<B: PacketBuffer>(header: RtcpHeader, buf: &mut B) -> Result<RtcpSrPacket> {
+    let num_report_blocks = header.report_count as usize;
+    Ok(RtcpSrPacket {
+        header,
+        sender_ssrc: buf.read_u32::<NetworkEndian>().context("sender ssrc")?,
+        sender_info: parse_rtcp_sender_info(buf).context("rtcp sender info")?,
+        report_blocks: parse_rtcp_report_blocks(num_report_blocks, buf).context("report blocks")?,
     })
 }

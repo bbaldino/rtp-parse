@@ -4,4 +4,3 @@ pub mod rtcp;
 mod packet_buffer;
 pub mod util;
 pub(crate) mod validators;
-pub(crate) mod with_context;

@@ -9,4 +9,5 @@ edition = "2018"
 #bitbuffer = { git = "https://github.com/bbaldino/bitbuffer" }
 bytebuffer = { path = "../bytebuffer" }
 byteorder = "1.0"
+anyhow = "1.0.44"
 thiserror = "1.0"

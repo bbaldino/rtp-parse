@@ -1,10 +1,7 @@
+use anyhow::{Context, Result};
 use byteorder::NetworkEndian;
 
-use crate::{
-    error::RtpParseResult,
-    packet_buffer::PacketBuffer,
-    with_context::{with_context, Context},
-};
+use crate::packet_buffer::PacketBuffer;
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.4.1
 ///        +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
@@ -27,24 +24,20 @@ pub struct RtcpSenderInfo {
     pub sender_octet_count: u32,
 }
 
-pub fn parse_rtcp_sender_info<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<RtcpSenderInfo> {
-    with_context("sender info", || {
-        Ok(RtcpSenderInfo {
-            ntp_timestamp_msw: buf
-                .read_u32::<NetworkEndian>()
-                .with_context("ntp timestamp msw")?,
-            ntp_timestamp_lsw: buf
-                .read_u32::<NetworkEndian>()
-                .with_context("ntp timestamp lsw")?,
-            rtp_timestamp: buf
-                .read_u32::<NetworkEndian>()
-                .with_context("rtp timestamp")?,
-            sender_packet_count: buf
-                .read_u32::<NetworkEndian>()
-                .with_context("sender packet counter")?,
-            sender_octet_count: buf
-                .read_u32::<NetworkEndian>()
-                .with_context("sender octet count")?,
-        })
+pub fn parse_rtcp_sender_info<B: PacketBuffer>(buf: &mut B) -> Result<RtcpSenderInfo> {
+    Ok(RtcpSenderInfo {
+        ntp_timestamp_msw: buf
+            .read_u32::<NetworkEndian>()
+            .context("ntp timestamp msw")?,
+        ntp_timestamp_lsw: buf
+            .read_u32::<NetworkEndian>()
+            .context("ntp timestamp lsw")?,
+        rtp_timestamp: buf.read_u32::<NetworkEndian>().context("rtp timestamp")?,
+        sender_packet_count: buf
+            .read_u32::<NetworkEndian>()
+            .context("sender packet counter")?,
+        sender_octet_count: buf
+            .read_u32::<NetworkEndian>()
+            .context("sender octet count")?,
     })
 }

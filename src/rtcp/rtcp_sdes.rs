@@ -1,11 +1,10 @@
 use std::str::from_utf8;
 
+use anyhow::{Context, Result};
 use byteorder::NetworkEndian;
 
-use crate::error::RtpParseResult;
 use crate::packet_buffer::PacketBuffer;
 use crate::rtcp::rtcp_header::RtcpHeader;
-use crate::with_context::{with_context, Context};
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.5
 ///         0                   1                   2                   3
@@ -46,44 +45,37 @@ impl RtcpSdesPacket {
     pub const PT: u8 = 202;
 }
 
-pub fn parse_rtcp_sdes<B: PacketBuffer>(
-    buf: &mut B,
-    header: RtcpHeader,
-) -> RtpParseResult<RtcpSdesPacket> {
-    with_context("rtcp sdes", || {
-        let num_chunks = header.report_count as usize;
-        Ok(RtcpSdesPacket {
-            header,
-            chunks: parse_sdes_chunks(buf, num_chunks)?,
-        })
+pub fn parse_rtcp_sdes<B: PacketBuffer>(buf: &mut B, header: RtcpHeader) -> Result<RtcpSdesPacket> {
+    let num_chunks = header.report_count as usize;
+    Ok(RtcpSdesPacket {
+        header,
+        chunks: parse_sdes_chunks(buf, num_chunks)?,
     })
 }
 
 pub fn parse_sdes_chunks<B: PacketBuffer>(
     buf: &mut B,
     num_chunks: usize,
-) -> RtpParseResult<Vec<SdesChunk>> {
+) -> Result<Vec<SdesChunk>> {
     (0..num_chunks)
-        .map(|_| parse_sdes_chunk(buf))
-        .collect::<RtpParseResult<Vec<SdesChunk>>>()
+        .map(|i| parse_sdes_chunk(buf).context(format!("sdes chunk {}", i)))
+        .collect::<Result<Vec<SdesChunk>>>()
 }
 
-pub fn parse_sdes_chunk<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<SdesChunk> {
-    with_context("sdes chunk", || {
-        Ok(SdesChunk {
-            ssrc: buf.read_u32::<NetworkEndian>().with_context("ssrc")?,
-            sdes_item: parse_sdes_item(buf)?,
-        })
+pub fn parse_sdes_chunk<B: PacketBuffer>(buf: &mut B) -> Result<SdesChunk> {
+    Ok(SdesChunk {
+        ssrc: buf.read_u32::<NetworkEndian>().context("ssrc")?,
+        sdes_item: parse_sdes_item(buf)?,
     })
 }
 
-pub fn parse_rtcp_sdes_items<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<Vec<SdesItem>> {
+pub fn parse_rtcp_sdes_items<B: PacketBuffer>(buf: &mut B) -> Result<Vec<SdesItem>> {
     let mut sdes_items: Vec<SdesItem> = Vec::new();
     loop {
-        match parse_sdes_item(buf) {
+        match parse_sdes_item(buf).context("sdes item") {
             Ok(SdesItem::Empty) => break,
             Ok(item) => sdes_items.push(item),
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
         }
     }
     Ok(sdes_items)
@@ -94,30 +86,28 @@ pub fn parse_rtcp_sdes_items<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<Vec
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// |      ID       |     length    | value                       ...
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-pub fn parse_sdes_item<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<SdesItem> {
-    with_context("sdes item", || {
-        let id = buf.read_u8().with_context("id")?;
-        match id {
-            0 => Ok(SdesItem::Empty),
-            t => {
-                let length = buf.read_u8().with_context("length")? as usize;
-                let mut bytes = vec![0; length];
-                buf.read_exact(&mut bytes).with_context("item bytes")?;
+pub fn parse_sdes_item<B: PacketBuffer>(buf: &mut B) -> Result<SdesItem> {
+    let id = buf.read_u8().context("id")?;
+    match id {
+        0 => Ok(SdesItem::Empty),
+        t => {
+            let length = buf.read_u8().context("length")? as usize;
+            let mut bytes = vec![0; length];
+            buf.read_exact(&mut bytes).context("item bytes")?;
 
-                // Now parse the payload according to the actual SDES item type
-                match t {
-                    1 => match from_utf8(&bytes) {
-                        Ok(s) => Ok(SdesItem::Cname(s.to_owned())),
-                        Err(e) => Err(e.into()),
-                    },
-                    t => Ok(SdesItem::Unknown {
-                        item_type: t,
-                        data: bytes.to_vec(),
-                    }),
-                }
+            // Now parse the payload according to the actual SDES item type
+            match t {
+                1 => match from_utf8(&bytes) {
+                    Ok(s) => Ok(SdesItem::Cname(s.to_owned())),
+                    Err(e) => Err(e.into()),
+                },
+                t => Ok(SdesItem::Unknown {
+                    item_type: t,
+                    data: bytes.to_vec(),
+                }),
             }
         }
-    })
+    }
 }
 
 #[cfg(test)]

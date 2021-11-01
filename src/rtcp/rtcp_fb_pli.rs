@@ -1,7 +1,6 @@
-use crate::{
-    error::RtpParseResult, packet_buffer::PacketBuffer, validators::RequireEqual,
-    with_context::with_context,
-};
+use anyhow::{Context, Result};
+
+use crate::{packet_buffer::PacketBuffer, validators::RequireEqual};
 
 use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader};
 
@@ -26,9 +25,10 @@ pub fn parse_rtcp_fb_pli<B: PacketBuffer>(
     header: RtcpHeader,
     fb_header: RtcpFbHeader,
     _buf: &mut B,
-) -> RtpParseResult<RtcpFbPliPacket> {
-    with_context("rtcp fb pli", || {
-        header.length_field.require_equal(2)?;
-        Ok(RtcpFbPliPacket { header, fb_header })
-    })
+) -> Result<RtcpFbPliPacket> {
+    header
+        .length_field
+        .require_equal(2)
+        .context("rtcp fb pli length")?;
+    Ok(RtcpFbPliPacket { header, fb_header })
 }

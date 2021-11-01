@@ -1,10 +1,7 @@
+use anyhow::{Context, Result};
 use byteorder::NetworkEndian;
 
-use crate::{
-    error::RtpParseResult,
-    packet_buffer::PacketBuffer,
-    with_context::{with_context, Context},
-};
+use crate::packet_buffer::PacketBuffer;
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.4.1
 ///         0                   1                   2                   3
@@ -60,34 +57,30 @@ impl RtcpReportBlock {
 pub fn parse_rtcp_report_blocks<B: PacketBuffer>(
     num_blocks: usize,
     buf: &mut B,
-) -> RtpParseResult<RtcpReportBlocks> {
-    with_context("report blocks", || {
-        (0..num_blocks)
-            .map(|i| parse_rtcp_report_block(buf).with_context(format!("report block{}", i)))
-            .collect::<RtpParseResult<Vec<RtcpReportBlock>>>()
-            .map(|blocks| RtcpReportBlocks(blocks))
-    })
+) -> Result<RtcpReportBlocks> {
+    (0..num_blocks)
+        .map(|i| parse_rtcp_report_block(buf).context(format!("report block{}", i)))
+        .collect::<Result<Vec<RtcpReportBlock>>>()
+        .map(|blocks| RtcpReportBlocks(blocks))
 }
 
-pub fn parse_rtcp_report_block<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<RtcpReportBlock> {
+pub fn parse_rtcp_report_block<B: PacketBuffer>(buf: &mut B) -> Result<RtcpReportBlock> {
     Ok(RtcpReportBlock {
-        ssrc: buf.read_u32::<NetworkEndian>().with_context("ssrc")?,
-        fraction_lost: buf.read_u8().with_context("fraction lost")?,
-        cumulative_lost: buf
-            .read_u24::<NetworkEndian>()
-            .with_context("cumulative lost")?,
+        ssrc: buf.read_u32::<NetworkEndian>().context("ssrc")?,
+        fraction_lost: buf.read_u8().context("fraction lost")?,
+        cumulative_lost: buf.read_u24::<NetworkEndian>().context("cumulative lost")?,
         extended_highest_seq_num: buf
             .read_u32::<NetworkEndian>()
-            .with_context("extended highest seq num")?,
+            .context("extended highest seq num")?,
         interarrival_jitter: buf
             .read_u32::<NetworkEndian>()
-            .with_context("interarrival jitter")?,
+            .context("interarrival jitter")?,
         last_sr_timestamp: buf
             .read_u32::<NetworkEndian>()
-            .with_context("last sr timestamp")?,
+            .context("last sr timestamp")?,
         delay_since_last_sr: buf
             .read_u32::<NetworkEndian>()
-            .with_context("delay since last SR")?,
+            .context("delay since last SR")?,
     })
 }
 

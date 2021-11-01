@@ -1,11 +1,7 @@
+use anyhow::{Context, Result};
 use byteorder::NetworkEndian;
 
-use crate::{
-    error::RtpParseResult,
-    packet_buffer::PacketBuffer,
-    validators::RequireEqual,
-    with_context::{with_context, Context},
-};
+use crate::{packet_buffer::PacketBuffer, validators::RequireEqual};
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.1
 ///  0                   1                   2                   3
@@ -37,20 +33,13 @@ impl RtcpHeader {
     }
 }
 
-pub fn parse_rtcp_header<B: PacketBuffer>(buf: &mut B) -> RtpParseResult<RtcpHeader> {
-    with_context("RTCP header", || {
-        Ok(RtcpHeader {
-            version: buf
-                .read_bits_as_u8(2)
-                .require_equal(2)
-                .with_context("version")?,
-            has_padding: buf.read_bit_as_bool().with_context("has_padding")?,
-            report_count: buf.read_bits_as_u8(5).with_context("report count")?,
-            packet_type: buf.read_u8().with_context("packet type")?,
-            length_field: buf
-                .read_u16::<NetworkEndian>()
-                .with_context("length field")?,
-        })
+pub fn parse_rtcp_header<B: PacketBuffer>(buf: &mut B) -> Result<RtcpHeader> {
+    Ok(RtcpHeader {
+        version: buf.read_bits_as_u8(2).require_equal(2).context("version")?,
+        has_padding: buf.read_bit_as_bool().context("has_padding")?,
+        report_count: buf.read_bits_as_u8(5).context("report count")?,
+        packet_type: buf.read_u8().context("packet type")?,
+        length_field: buf.read_u16::<NetworkEndian>().context("length field")?,
     })
 }
 

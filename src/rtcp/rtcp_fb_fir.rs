@@ -1,10 +1,7 @@
+use anyhow::{Context, Result};
 use byteorder::NetworkEndian;
 
-use crate::{
-    error::RtpParseResult,
-    packet_buffer::PacketBuffer,
-    with_context::{with_context, Context},
-};
+use crate::packet_buffer::PacketBuffer;
 
 use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader};
 
@@ -49,16 +46,14 @@ pub fn parse_rtcp_fb_fir<B: PacketBuffer>(
     header: RtcpHeader,
     fb_header: RtcpFbHeader,
     buf: &mut B,
-) -> RtpParseResult<RtcpFbFirPacket> {
-    with_context("rtcp fb fir", || {
-        let ssrc = buf.read_u32::<NetworkEndian>().with_context("ssrc")?;
-        let seq_num = buf.read_u8().with_context("seq num")?;
-        let _reserved = buf.read_u24::<NetworkEndian>().with_context("reserved")?;
-        Ok(RtcpFbFirPacket {
-            header,
-            fb_header,
-            ssrc,
-            seq_num,
-        })
+) -> Result<RtcpFbFirPacket> {
+    let ssrc = buf.read_u32::<NetworkEndian>().context("ssrc")?;
+    let seq_num = buf.read_u8().context("seq num")?;
+    let _reserved = buf.read_u24::<NetworkEndian>().context("reserved")?;
+    Ok(RtcpFbFirPacket {
+        header,
+        fb_header,
+        ssrc,
+        seq_num,
     })
 }
