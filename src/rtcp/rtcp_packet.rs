@@ -59,7 +59,7 @@ pub fn parse_rtcp_packet<B: PacketBuffer>(buf: &mut B) -> Result<SomeRtcpPacket>
 
 pub fn parse_single_rtcp_packet<B: PacketBuffer>(buf: &mut B) -> Result<SomeRtcpPacket> {
     let max_packet_size = buf.bytes_remaining();
-    let header = parse_rtcp_header(buf)?;
+    let header = parse_rtcp_header(buf).context("rtcp header")?;
     if header.length_bytes() > max_packet_size {
         return Err(InvalidLengthValue {
             length_field_bytes: header.length_bytes(),
