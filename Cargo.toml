@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 bitcursor = { path = "../bitcursor" }
 anyhow = "1"
+bitvec = "1.0.1"
