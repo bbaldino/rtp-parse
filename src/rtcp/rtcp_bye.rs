@@ -63,7 +63,7 @@ pub fn read_rtcp_bye<R: BitRead>(buf: &mut R, header: RtcpHeader) -> Result<Rtcp
     })
 }
 
-pub fn write_rtcp_bye<W: BitWrite>(packet: &RtcpByePacket, buf: &mut W) -> Result<()> {
+pub fn write_rtcp_bye<W: BitWrite>(buf: &mut W, packet: &RtcpByePacket) -> Result<()> {
     write_rtcp_header(buf, &packet.header).context("header")?;
     packet
         .ssrcs
