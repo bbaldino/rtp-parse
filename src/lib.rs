@@ -1,4 +1,8 @@
-use std::io::Seek;
+use std::{
+    fmt::{Debug, LowerHex},
+    io::Seek,
+    ops::Range,
+};
 
 use bitcursor::{bit_cursor::BitCursor, bit_read::BitRead, bit_write::BitWrite};
 use bitvec::{field::BitField, order::BitOrder, slice::BitSlice, store::BitStore, vec::BitVec};
@@ -6,12 +10,21 @@ use bitvec::{field::BitField, order::BitOrder, slice::BitSlice, store::BitStore,
 pub mod rtcp;
 mod util;
 
-pub trait PacketBuffer: BitRead + Seek {
+pub trait PacketBuffer: BitRead + Seek + Debug + LowerHex {
     /// Return the current cursor position of this buffer
     fn position(&self) -> u64;
 
     /// How many bytes remaining in this buffer.
     fn bytes_remaining(&self) -> usize;
+
+    /// Get a sub buffer of this one, corresponding to the given range.  Note that advances in the
+    /// given sub-buffer's position wll _not_ be reflected in the parent; you'll need to seek
+    /// manually.
+    ///
+    /// # Example:
+    /// TODO
+    ///
+    fn sub_buffer(&self, range: Range<usize>) -> impl PacketBuffer;
 }
 
 impl<T, O> PacketBuffer for BitCursor<BitVec<T, O>>
@@ -26,6 +39,29 @@ where
 
     fn bytes_remaining(&self) -> usize {
         self.remaining_slice().len() / 8
+    }
+
+    fn sub_buffer(&self, range: Range<usize>) -> impl PacketBuffer {
+        self.sub_cursor(range)
+    }
+}
+
+impl<T, O> PacketBuffer for BitCursor<&BitSlice<T, O>>
+where
+    T: BitStore,
+    O: BitOrder,
+    BitSlice<T, O>: BitField,
+{
+    fn position(&self) -> u64 {
+        BitCursor::position(self)
+    }
+
+    fn bytes_remaining(&self) -> usize {
+        self.remaining_slice().len() / 8
+    }
+
+    fn sub_buffer(&self, range: Range<usize>) -> impl PacketBuffer {
+        self.sub_cursor(range)
     }
 }
 

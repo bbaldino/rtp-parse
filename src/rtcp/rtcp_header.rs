@@ -1,4 +1,6 @@
-use anyhow::{Context, Result};
+use std::fmt::{Debug, LowerHex};
+
+use anyhow::{anyhow, bail, Context, Result};
 use bitcursor::{
     bit_read::BitRead, bit_read_exts::BitReadExts, bit_write::BitWrite,
     bit_write_exts::BitWriteExts, byte_order::NetworkOrder, ux::*,
@@ -26,7 +28,18 @@ pub struct RtcpHeader {
     pub length_field: u16,
 }
 
-pub fn read_rtcp_header<R: BitRead>(buf: &mut R) -> Result<RtcpHeader> {
+impl RtcpHeader {
+    pub const SIZE_BYTES: usize = 4;
+
+    /// The length of this RTCP packet's payload (i.e. excluding the header) in bytes
+    pub fn payload_length_bytes(&self) -> Result<u16> {
+        self.length_field
+            .checked_mul(4)
+            .ok_or(anyhow!("Invalid length field"))
+    }
+}
+
+pub fn read_rtcp_header<R: BitRead + Debug + LowerHex>(buf: &mut R) -> Result<RtcpHeader> {
     Ok(RtcpHeader {
         version: buf.read_u2().context("version")?,
         has_padding: buf.read_bool().context("has_padding")?,

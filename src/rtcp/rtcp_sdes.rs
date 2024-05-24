@@ -160,3 +160,77 @@ pub fn write_sdes_chunk<W: PacketBufferMut>(buf: &mut W, sdes_chunk: &SdesChunk)
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use bitcursor::{
+        bit_cursor::BitCursor,
+        ux::{u2, u5},
+    };
+    use bitvec::{order::Msb0, vec::BitVec};
+
+    use super::*;
+
+    fn create_cname_item_bytes(str: &str) -> Vec<u8> {
+        let data = str.bytes();
+        let mut item_data = vec![0x1, data.len() as u8];
+        item_data.extend(data.collect::<Vec<u8>>());
+
+        item_data
+    }
+
+    #[test]
+    fn test_read_sdes_item_success() {
+        let str = "hello, world!";
+        let item_data = create_cname_item_bytes(str);
+
+        let mut buf = BitCursor::new(BitVec::<u8, Msb0>::from_vec(item_data));
+        let sdes_item = read_sdes_item(&mut buf).unwrap();
+        match sdes_item {
+            SdesItem::Cname(v) => assert_eq!(v, str),
+            _ => assert!(false, "Wrong SdesItem type"),
+        }
+    }
+
+    #[test]
+    fn test_read_sdes_item_bad_data() {
+        let data: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        let mut item_data = vec![0x1, data.len() as u8];
+        item_data.extend(data);
+
+        let mut buf = BitCursor::new(BitVec::<u8, Msb0>::from_vec(item_data));
+        let res = read_sdes_item(&mut buf);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_read_sdes() {
+        let header = RtcpHeader {
+            version: u2::new(2),
+            has_padding: false,
+            report_count: u5::new(1),
+            packet_type: 202,
+            length_field: 6,
+        };
+        #[rustfmt::skip]
+        let sdes_chunk = vec![
+            // ssrc
+            0xa8, 0x9c, 0x2a, 0xc5,
+            // Cname, length 16, value 6EENBH+pFqtpT6SF
+            0x01, 0x10, 0x36, 0x45, 0x45, 0x4e, 0x42, 0x48, 0x2b, 0x70, 0x46, 0x71, 0x74, 0x70, 0x54, 0x36, 0x53, 0x46,
+            // Empty sdes item to finish
+            0x00,
+        ];
+        let mut cursor = BitCursor::new(BitVec::<u8, Msb0>::from_vec(sdes_chunk));
+
+        let sdes = read_rtcp_sdes(&mut cursor, header).expect("sdes");
+        assert_eq!(sdes.chunks.len(), 1);
+        let chunk = sdes.chunks.first().expect("sdes chunk");
+        assert_eq!(chunk.ssrc, 2828806853);
+    }
+
+    // TODO:
+    // parse_sdes_chunk success | failure in chunk | failure in item
+    // parse_sdes_chunks
+    // parse_rtcp_sdes success | failure in chunk
+}

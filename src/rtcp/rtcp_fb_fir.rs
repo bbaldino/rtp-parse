@@ -1,7 +1,10 @@
 use crate::{PacketBuffer, PacketBufferMut};
 use anyhow::{bail, Context, Result};
 use bitcursor::{
-    bit_read_exts::BitReadExts, bit_write_exts::BitWriteExts, byte_order::NetworkOrder, ux::u24,
+    bit_read_exts::BitReadExts,
+    bit_write_exts::BitWriteExts,
+    byte_order::NetworkOrder,
+    ux::{u24, u5},
 };
 
 use super::{
@@ -35,7 +38,7 @@ pub struct RtcpFbFirPacket {
 }
 
 impl RtcpFbFirPacket {
-    pub const FMT: u8 = 4;
+    pub const FMT: u5 = u5::new(4);
 }
 
 pub fn read_rtcp_fb_fir<B: PacketBuffer>(

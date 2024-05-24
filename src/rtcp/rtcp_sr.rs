@@ -1,13 +1,18 @@
+use std::fmt::Debug;
+
 use anyhow::{Context, Result};
 use bitcursor::{
-    bit_read::BitRead, bit_read_exts::BitReadExts, bit_write::BitWrite,
-    bit_write_exts::BitWriteExts, byte_order::NetworkOrder,
+    bit_read_exts::BitReadExts, bit_write::BitWrite, bit_write_exts::BitWriteExts,
+    byte_order::NetworkOrder,
 };
 
-use crate::rtcp::{
-    rtcp_header::write_rtcp_header,
-    rtcp_report_block::{read_rtcp_report_block, write_rtcp_report_block},
-    rtcp_sender_info::{read_rtcp_sender_info, write_rtcp_sender_info},
+use crate::{
+    rtcp::{
+        rtcp_header::write_rtcp_header,
+        rtcp_report_block::{read_rtcp_report_block, write_rtcp_report_block},
+        rtcp_sender_info::{read_rtcp_sender_info, write_rtcp_sender_info},
+    },
+    PacketBuffer,
 };
 
 use super::{
@@ -62,7 +67,7 @@ impl RtcpSrPacket {
     pub const PT: u8 = 200;
 }
 
-pub fn read_rtcp_sr<R: BitRead>(buf: &mut R, header: RtcpHeader) -> Result<RtcpSrPacket> {
+pub fn read_rtcp_sr<B: PacketBuffer>(buf: &mut B, header: RtcpHeader) -> Result<RtcpSrPacket> {
     let sender_ssrc = buf.read_u32::<NetworkOrder>().context("sender ssrc")?;
     let sender_info = read_rtcp_sender_info(buf).context("sender info")?;
     let report_blocks = (0u32..header.report_count.into())
