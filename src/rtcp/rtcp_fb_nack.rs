@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use bitcursor::{
-    bit_read_exts::BitReadExts, bit_write_exts::BitWriteExts, byte_order::NetworkOrder,
+    bit_read_exts::BitReadExts, bit_write_exts::BitWriteExts, byte_order::NetworkOrder, ux::u5,
 };
 
 use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader};
@@ -29,7 +29,7 @@ pub struct RtcpFbNackPacket {
 // sequence numbers that couldn't be added to the buffer)
 
 impl RtcpFbNackPacket {
-    pub const FMT: u8 = 1;
+    pub const FMT: u5 = u5::new(1);
 }
 
 pub fn read_rtcp_fb_nack<B: PacketBuffer>(

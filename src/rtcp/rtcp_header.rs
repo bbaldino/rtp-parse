@@ -1,6 +1,6 @@
 use std::fmt::{Debug, LowerHex};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use bitcursor::{
     bit_read::BitRead, bit_read_exts::BitReadExts, bit_write::BitWrite,
     bit_write_exts::BitWriteExts, byte_order::NetworkOrder, ux::*,
