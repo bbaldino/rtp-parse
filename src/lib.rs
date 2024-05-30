@@ -5,7 +5,7 @@ use std::{
 };
 
 use bitcursor::{bit_cursor::BitCursor, bit_read::BitRead, bit_write::BitWrite};
-use bitvec::{field::BitField, order::BitOrder, slice::BitSlice, store::BitStore, vec::BitVec};
+use bitvec::{order::Msb0, slice::BitSlice, vec::BitVec};
 
 pub mod rtcp;
 mod util;
@@ -27,12 +27,7 @@ pub trait PacketBuffer: BitRead + Seek + Debug + LowerHex {
     fn sub_buffer(&self, range: Range<usize>) -> impl PacketBuffer;
 }
 
-impl<T, O> PacketBuffer for BitCursor<BitVec<T, O>>
-where
-    T: BitStore,
-    O: BitOrder,
-    BitSlice<T, O>: BitField,
-{
+impl PacketBuffer for BitCursor<BitVec<u8, Msb0>> {
     fn position(&self) -> u64 {
         BitCursor::position(self)
     }
@@ -46,12 +41,7 @@ where
     }
 }
 
-impl<T, O> PacketBuffer for BitCursor<&BitSlice<T, O>>
-where
-    T: BitStore,
-    O: BitOrder,
-    BitSlice<T, O>: BitField,
-{
+impl PacketBuffer for BitCursor<&BitSlice<u8, Msb0>> {
     fn position(&self) -> u64 {
         BitCursor::position(self)
     }
