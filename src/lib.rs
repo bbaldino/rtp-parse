@@ -8,7 +8,8 @@ use bitcursor::{bit_cursor::BitCursor, bit_read::BitRead, bit_write::BitWrite};
 use bitvec::{order::Msb0, slice::BitSlice, vec::BitVec};
 
 pub mod rtcp;
-mod util;
+pub mod rtp;
+pub mod util;
 
 pub trait PacketBuffer: BitRead + Seek + Debug + LowerHex {
     /// Return the current cursor position of this buffer
