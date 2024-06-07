@@ -1,12 +1,8 @@
 use std::io::Seek;
 
-use anyhow::{Context, Result};
 use bitcursor::{
-    bit_cursor::BitCursor, bit_read::BitRead, bit_read_exts::BitReadExts, byte_order::NetworkOrder,
-    ux::*,
+    bit_cursor::BitCursor, bit_read_exts::BitReadExts, byte_order::NetworkOrder, ux::*,
 };
-
-use super::header_extensions::{parse_header_extensions, SomeHeaderExtension};
 
 /// * https://tools.ietf.org/html/rfc3550#section-5.1
 /// 0                   1                   2                   3
@@ -23,66 +19,9 @@ use super::header_extensions::{parse_header_extensions, SomeHeaderExtension};
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// |              ...extensions (if present)...                    |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[derive(Debug)]
-pub struct RtpHeader {
-    pub version: u2,
-    pub has_padding: bool,
-    pub has_extensions: bool,
-    pub csrc_count: u4,
-    pub marked: bool,
-    pub payload_type: u7,
-    pub sequence_number: u16,
-    pub timestamp: u32,
-    pub ssrc: u32,
-    pub csrcs: Vec<u32>,
-    pub extensions: Vec<SomeHeaderExtension>,
-}
+pub struct RtpHeader;
 
 impl RtpHeader {
-    pub fn get_extension_by_id(&self, id: u8) -> Option<&SomeHeaderExtension> {
-        self.extensions.iter().find(|e| e.has_id(id))
-    }
-}
-
-pub fn read_rtp_header<R: BitRead>(buf: &mut R) -> Result<RtpHeader> {
-    let version = buf.read_u2().context("version")?;
-    let has_padding = buf.read_bool().context("has_padding")?;
-    let has_extensions = buf.read_bool().context("has_extensions")?;
-    let csrc_count = buf.read_u4().context("csrc_count")?;
-    let marked = buf.read_bool().context("marked")?;
-    let payload_type = buf.read_u7().context("payload_type")?;
-    let sequence_number = buf.read_u16::<NetworkOrder>().context("payload_type")?;
-    let timestamp = buf.read_u32::<NetworkOrder>().context("timestamp")?;
-    let ssrc = buf.read_u32::<NetworkOrder>().context("ssrc")?;
-    // TODO: I think we need to impl 'Step' on the uX types to get 'map' here to be able to do
-    // (u4::ZERO..csrc_count).map(...)
-    let csrcs = (0u32..csrc_count.into())
-        .map(|i| {
-            buf.read_u32::<NetworkOrder>()
-                .with_context(|| format!("csrc-{i}"))
-        })
-        .collect::<Result<Vec<u32>>>()
-        .context("csrcs")?;
-    let extensions = parse_header_extensions(buf).context("header extensions")?;
-
-    Ok(RtpHeader {
-        version,
-        has_padding,
-        has_extensions,
-        csrc_count,
-        marked,
-        payload_type,
-        sequence_number,
-        timestamp,
-        ssrc,
-        csrcs,
-        extensions,
-    })
-}
-
-pub struct RtpHeader2;
-
-impl RtpHeader2 {
     pub fn version(buf: &[u8]) -> u2 {
         u2::new((buf[0] & 0b11000000) >> 6)
     }
@@ -107,24 +46,30 @@ impl RtpHeader2 {
         u7::new(buf[1] & 0b01111111)
     }
 
+    pub fn seq_num(buf: &[u8]) -> u16 {
+        let seq_num_b1 = buf[3] as u16;
+        let seq_num_b2 = buf[4] as u16;
+        (seq_num_b1 << 8) | seq_num_b2
+    }
+
     /// Returns the offset into the given buffer where the top-level extensions header would
     /// start, if this packet contains extensions.
     pub fn extensions_start_offset(buf: &[u8]) -> usize {
-        let csrc_count: usize = RtpHeader2::csrc_count(buf).into();
+        let csrc_count: usize = RtpHeader::csrc_count(buf).into();
         12 + csrc_count * 4
     }
 
     pub fn payload_offset(buf: &[u8]) -> usize {
-        RtpHeader2::extensions_start_offset(buf)
-            + RtpHeader2::header_extensions_length_bytes(buf) as usize
+        RtpHeader::extensions_start_offset(buf)
+            + RtpHeader::header_extensions_length_bytes(buf) as usize
     }
 
     /// Returns the length of the extensions (including the extensions header) in bytes.  If
     /// has_extensions is false, returns 0.
     pub fn header_extensions_length_bytes(buf: &[u8]) -> u16 {
-        if RtpHeader2::has_extensions(buf) {
+        if RtpHeader::has_extensions(buf) {
             let mut cursor = BitCursor::new(buf);
-            let ext_offset = RtpHeader2::extensions_start_offset(buf);
+            let ext_offset = RtpHeader::extensions_start_offset(buf);
             cursor
                 // Add 2 more to get to the length field
                 .seek(std::io::SeekFrom::Start((ext_offset as u64 + 2) * 8))

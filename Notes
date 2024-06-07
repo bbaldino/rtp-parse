@@ -1,0 +1,29 @@
+
+
+
+RTP packet model
+
+Initially I planned on doing a more 'optimal' parsing of the RTP packet:
+* RtpPacket would just have a Vec<u8> for the data and a usize representing the payload offset.
+* Instead of parsing/copying out fields for the header, we'd merely have a 'lens' into the existing memory to parse things as needed
+* Header extensions would hold references into the backing data
+
+I think _eventually_ I will go towards something like that, but there's a lot of complexity there, especially when you get into
+adding and removing header extensions.  So, to see how things go, I'm going to start with the opposite approach: copy _everything_
+out of the original data and then store it.
+
+It turns out the above approach makes tracking the incoming statistics difficult: we want to track this on a per-SSRC level, so after
+RTP parsing has been done, but if we fully parse the packet we lose being able to know its original size. We could save that off,
+but that feels a bit weird.  I tried a few different approaches, with their respective performance in my test:
+
+1. Fully parse the RTP header, extensions and packet (copying the payload into a new vec): ~2 packets/ms
+2. Don't parse at all: use a 'lens' for the header, save off offset/length for extensions + paylad:  ~25 packets/ms (this one is a bit
+     misleading, as the extensions _will_ have to be parsed at some point, but potentially they could stay as a slice and just use a 
+     'lens' style approach to read them)
+3. Use a 'lens' for the header, fully parse the extensions, save offset/length for the payload: ~18 packets/ms
+
+So #3 seems reasonable, given that there's an extremely high chance we're going to look at the extensions for every packet we don't drop,
+we'll have to parse them at some point (perhaps can make sure we skip for packets that we know are going to get dropped).  The plan will 
+be to still preserve the original buffer and save a list of 'pending operations' on the header extensions (additions & removals).  
+At the end we'll see if the original buffer is suitable or not: if things can still fit, it can be used. If not, we can allocate new chunk 
+for the extensions and chain them together.
