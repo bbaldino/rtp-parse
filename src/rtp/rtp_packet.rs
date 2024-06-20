@@ -1,4 +1,4 @@
-use std::{fmt::Debug, ops::Range};
+use std::{fmt::Debug, io::Write, ops::Range};
 
 use anyhow::Result;
 use bitcursor::{bit_cursor::BitCursor, ux::u7};
@@ -43,6 +43,11 @@ impl RtpPacket {
 
     pub fn get_extension_by_id(&self, id: u8) -> Option<&SomeHeaderExtension> {
         self.header_extensions.iter().find(|e| e.has_id(id))
+    }
+
+    /// Return the original size of this packet in bytes.
+    pub fn size_bytes(&self) -> u32 {
+        self.buf.len() as u32
     }
 }
 

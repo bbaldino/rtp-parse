@@ -47,9 +47,15 @@ impl RtpHeader {
     }
 
     pub fn seq_num(buf: &[u8]) -> u16 {
-        let seq_num_b1 = buf[3] as u16;
-        let seq_num_b2 = buf[4] as u16;
-        (seq_num_b1 << 8) | seq_num_b2
+        u16::from_be_bytes(buf[3..4].try_into().unwrap())
+    }
+
+    pub fn timestamp(buf: &[u8]) -> u32 {
+        u32::from_be_bytes(buf[4..8].try_into().unwrap())
+    }
+
+    pub fn ssrc(buf: &[u8]) -> u32 {
+        u32::from_be_bytes(buf[8..12].try_into().unwrap())
     }
 
     /// Returns the offset into the given buffer where the top-level extensions header would

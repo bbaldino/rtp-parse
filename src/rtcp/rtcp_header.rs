@@ -28,6 +28,14 @@ pub struct RtcpHeader {
     pub length_field: u16,
 }
 
+// When decrypting RTCP, we haven't parsed the packet yet but need to grab the sender SSRC to
+// retrieve the proper srtcp context.  The sender SSRC isn't modeled as part of the header, as
+// different RTCP packets use it differently, so this helper function can be used to retrieve it
+// from an unparsed RTCP packet
+pub fn get_sender_ssrc(buf: &[u8]) -> u32 {
+    u32::from_be_bytes(buf[4..8].try_into().unwrap())
+}
+
 impl RtcpHeader {
     pub const SIZE_BYTES: usize = 4;
 

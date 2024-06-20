@@ -18,6 +18,7 @@ use super::{
     rtcp_fb_header::read_rtcp_fb_header,
     rtcp_fb_nack::RtcpFbNackPacket,
     rtcp_fb_packet::{RtcpFbPsPacket, RtcpFbTlPacket},
+    rtcp_fb_pli::{read_rtcp_fb_pli, RtcpFbPliPacket},
     rtcp_header::RtcpHeader,
     rtcp_rr::{read_rtcp_rr, RtcpRrPacket},
     rtcp_sdes::{read_rtcp_sdes, RtcpSdesPacket},
@@ -34,6 +35,7 @@ pub enum SomeRtcpPacket {
     RtcpFbNackPacket(RtcpFbNackPacket),
     RtcpFbFirPacket(RtcpFbFirPacket),
     RtcpFbTccPacket(RtcpFbTccPacket),
+    RtcpFbPliPacket(RtcpFbPliPacket),
     UnknownRtcpPacket {
         header: RtcpHeader,
         payload: Vec<u8>,
@@ -65,6 +67,9 @@ pub fn parse_single_rtcp_packet<B: PacketBuffer>(buf: &mut B) -> Result<SomeRtcp
     let payload_length = header
         .payload_length_bytes()
         .context("header length field")? as usize;
+    if payload_length > buf.bytes_remaining() {
+        bail!("Invalid RTCP packet, length {payload_length} bytes but buf has only {} bytes remaining", buf.bytes_remaining());
+    }
     let payload_length_bits = payload_length * 8;
     let mut payload_buffer = buf.sub_buffer(0..(payload_length * 8));
 
@@ -87,6 +92,10 @@ pub fn parse_single_rtcp_packet<B: PacketBuffer>(buf: &mut B) -> Result<SomeRtcp
                 (RtcpFbPsPacket::PT, RtcpFbFirPacket::FMT) => Ok(SomeRtcpPacket::RtcpFbFirPacket(
                     read_rtcp_fb_fir(&mut payload_buffer, header, fb_header)
                         .context("rtcp fb fir")?,
+                )),
+                (RtcpFbPsPacket::PT, RtcpFbPliPacket::FMT) => Ok(SomeRtcpPacket::RtcpFbPliPacket(
+                    read_rtcp_fb_pli(&mut payload_buffer, header, fb_header)
+                        .context("rtcp fb pli")?,
                 )),
                 (RtcpFbTlPacket::PT, RtcpFbTccPacket::FMT) => Ok(SomeRtcpPacket::RtcpFbTccPacket(
                     read_rtcp_fb_tcc(&mut payload_buffer, header, fb_header)

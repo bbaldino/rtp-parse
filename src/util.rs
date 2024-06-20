@@ -1,6 +1,6 @@
 use std::{
     io::{Read, Seek, SeekFrom},
-    ops::{Range, RangeInclusive},
+    ops::RangeInclusive,
 };
 
 use crate::rtcp::rtcp_header::RtcpHeader;
