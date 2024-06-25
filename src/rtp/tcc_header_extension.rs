@@ -1,4 +1,4 @@
-use super::header_extensions::SomeHeaderExtension;
+use super::header_extensions::SomeHeaderExtension2;
 
 //
 // https://tools.ietf.org/html/draft-holmer-rmcat-transport-wide-cc-extensions-01#section-2.2
@@ -9,12 +9,8 @@ use super::header_extensions::SomeHeaderExtension;
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //
 
-pub fn get_tcc_seq_num(ext: &SomeHeaderExtension) -> u16 {
-    match ext {
-        SomeHeaderExtension::OneByteHeaderExtension(e) => {
-            // TODO: cleaner way?
-            (e.data[0] as u16) << 8 | e.data[1] as u16
-        }
-        _ => panic!("Only one byte header is supported for tcc seq num"),
-    }
+pub fn get_tcc_seq_num(ext: &SomeHeaderExtension2) -> u16 {
+    let data = ext.data();
+
+    (data[0] as u16) << 8 | data[1] as u16
 }

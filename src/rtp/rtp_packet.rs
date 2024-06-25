@@ -110,7 +110,6 @@ pub struct RtpPacket2 {
     // Includes the fixed header and csrcs
     header: BytesMut,
     header_exts_buf: BytesMut,
-    // We lazily parse the header extensions
     parsed_header_extensions: HashMap<u8, SomeHeaderExtension2>,
     payload: BytesMut,
     pending_header_extension_ops: Vec<PendingHeaderExtensionOperation>,
@@ -123,6 +122,13 @@ impl RtpPacket2 {
 
     pub fn get_extension_by_id(&self, id: u8) -> Option<&SomeHeaderExtension2> {
         self.parsed_header_extensions.get(&id)
+    }
+
+    // TODO: this will give the "original" size of the packet, is that best? It's what we want for
+    // incoming stats, but at other point we'll want the "actual" size of the packet (which may
+    // have changed)
+    pub fn size_bytes(&self) -> usize {
+        self.header.len() + self.header_exts_buf.len() + self.payload.len()
     }
 }
 
