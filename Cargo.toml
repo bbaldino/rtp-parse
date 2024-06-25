@@ -9,3 +9,4 @@ edition = "2021"
 bitcursor = { path = "../bitcursor" }
 anyhow = "1"
 bitvec = "1.0.1"
+bytes = "1.6.0"

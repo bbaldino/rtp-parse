@@ -1,5 +1,11 @@
+use std::{collections::HashMap, io::Cursor};
+
 use anyhow::{Context, Result};
-use bitcursor::{bit_read::BitRead, bit_read_exts::BitReadExts, byte_order::NetworkOrder, ux::*};
+use bitcursor::{
+    bit_cursor::BitCursor, bit_read::BitRead, bit_read_exts::BitReadExts, byte_order::NetworkOrder,
+    ux::*,
+};
+use bytes::{Buf, Bytes};
 
 //  https://datatracker.ietf.org/doc/html/rfc3550#section-5.3.1
 //  0                   1                   2                   3
@@ -194,6 +200,13 @@ impl SomeHeaderExtension {
         }
     }
 
+    pub fn get_id(&self) -> u8 {
+        match self {
+            SomeHeaderExtension::OneByteHeaderExtension(ob) => ob.id.into(),
+            SomeHeaderExtension::TwoByteHeaderExtension(tb) => tb.id,
+        }
+    }
+
     pub fn get_data(&self) -> &[u8] {
         match self {
             SomeHeaderExtension::OneByteHeaderExtension(ob) => &ob.data,
@@ -223,5 +236,126 @@ pub fn parse_header_extensions(buf: &mut impl BitRead) -> Result<Vec<SomeHeaderE
             .collect())
     } else {
         panic!("invalid header extension type {ext_type:x}");
+    }
+}
+
+#[derive(Debug)]
+pub struct TwoByteHeaderExtension2(Bytes);
+
+impl TwoByteHeaderExtension2 {
+    pub fn id(&self) -> u8 {
+        self.0[0]
+    }
+
+    pub fn data(&self) -> Bytes {
+        self.0.slice(2..)
+    }
+}
+
+/// [`buf`] should start at the beginning of the header extension (the id)
+pub fn read_two_byte_header_extension(buf: &mut Bytes) -> TwoByteHeaderExtension2 {
+    let length_bytes = buf[1] + 1;
+    // The length field is in the second byte, and the '2' is to account for the id and length
+    // field bytes before the actul data
+    let he = buf.split_to(2 + length_bytes as usize);
+    TwoByteHeaderExtension2(he)
+}
+
+#[derive(Debug)]
+pub struct OneByteHeaderExtension2(Bytes);
+
+impl OneByteHeaderExtension2 {
+    pub fn id(&self) -> u8 {
+        (self.0[0] & 0xF0) >> 4
+    }
+
+    pub fn data(&self) -> Bytes {
+        self.0.slice(1..)
+    }
+}
+
+pub fn read_one_byte_header_extension(buf: &mut Bytes) -> OneByteHeaderExtension2 {
+    let length_bytes = (buf[0] & 0xF) + 1;
+    // TODO: here (and above) i think we need to validate against buf.len() before splitting
+    let he = buf.split_to(1 + length_bytes as usize);
+
+    OneByteHeaderExtension2(he)
+}
+
+#[derive(Debug)]
+pub enum SomeHeaderExtension2 {
+    OneByteHeaderExtension(OneByteHeaderExtension2),
+    TwoByteHeaderExtension(TwoByteHeaderExtension2),
+}
+
+impl SomeHeaderExtension2 {
+    pub fn id(&self) -> u8 {
+        match self {
+            SomeHeaderExtension2::OneByteHeaderExtension(e) => e.id(),
+            SomeHeaderExtension2::TwoByteHeaderExtension(e) => e.id(),
+        }
+    }
+
+    pub fn data(&self) -> Bytes {
+        match self {
+            SomeHeaderExtension2::OneByteHeaderExtension(e) => e.data(),
+            SomeHeaderExtension2::TwoByteHeaderExtension(e) => e.data(),
+        }
+    }
+}
+
+pub fn read_header_extensions(buf: Bytes) -> HashMap<u8, SomeHeaderExtension2> {
+    // TODO: should be consistent with use of cursor/bitcursor and Vec<u8> and Bytes
+    let mut cursor = Cursor::new(buf);
+
+    let ext_type = cursor.get_u16();
+    // Length field is length in 4 byte words
+    let length_bytes = cursor.get_u16() * 4;
+    let buf = cursor.into_inner();
+
+    let mut header_extensions_bytes = buf.slice(4..).slice(..length_bytes as usize);
+
+    let mut header_extensions: HashMap<u8, SomeHeaderExtension2> = HashMap::new();
+    while !header_extensions_bytes.is_empty() {
+        let ext = if TwoByteHeaderExtension::type_matches(ext_type) {
+            SomeHeaderExtension2::TwoByteHeaderExtension(read_two_byte_header_extension(
+                &mut header_extensions_bytes,
+            ))
+        } else if OneByteHeaderExtension::type_matches(ext_type) {
+            SomeHeaderExtension2::OneByteHeaderExtension(read_one_byte_header_extension(
+                &mut header_extensions_bytes,
+            ))
+        } else {
+            // TODO: change this to result
+            panic!("Invalid header extension type: {ext_type:x?}");
+        };
+
+        header_extensions.insert(ext.id(), ext);
+    }
+    header_extensions
+}
+
+#[cfg(test)]
+mod test {
+    use bytes::Bytes;
+
+    use super::read_header_extensions;
+
+    #[test]
+    fn test_one_byte_header_extensions() {
+        #[rustfmt::skip]
+        let data: Vec<u8> = vec![
+            0xBE, 0xDE, 0x00, 0x01,
+            0x10, 0xFF, 0x00, 0x00
+        ];
+
+        let bytes = Bytes::from(data);
+        let he = read_header_extensions(bytes);
+        // The padding bytes are parsed as a header extension
+        assert_eq!(he.len(), 2);
+        let ext_one = he
+            .get(&1)
+            .expect("should contain a header extension with ID 1");
+        assert_eq!(ext_one.data(), Bytes::from_static(&[0xFF]));
     }
 }
