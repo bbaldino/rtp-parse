@@ -8,19 +8,19 @@
 // |  ID   | len=0 |V| level       |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-use super::header_extensions::SomeHeaderExtension2;
+use super::header_extensions::SomeHeaderExtension;
 
 const AUDIO_LEVEL_MASK: u8 = 0x7F;
 const VAD_MASK: u8 = 0x80;
 
-pub fn get_audio_level(ext: &SomeHeaderExtension2) -> u8 {
+pub fn get_audio_level(ext: &SomeHeaderExtension) -> u8 {
     ext.data()[0] & AUDIO_LEVEL_MASK
 }
 
-pub fn is_muted(ext: &SomeHeaderExtension2) -> bool {
+pub fn is_muted(ext: &SomeHeaderExtension) -> bool {
     get_audio_level(ext) == 127
 }
 
-pub fn get_vad(ext: &SomeHeaderExtension2) -> bool {
+pub fn get_vad(ext: &SomeHeaderExtension) -> bool {
     ext.data()[0] & VAD_MASK != 0
 }

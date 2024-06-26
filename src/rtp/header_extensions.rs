@@ -1,10 +1,5 @@
 use std::{collections::HashMap, io::Cursor};
 
-use anyhow::{Context, Result};
-use bitcursor::{
-    bit_cursor::BitCursor, bit_read::BitRead, bit_read_exts::BitReadExts, byte_order::NetworkOrder,
-    ux::*,
-};
 use bytes::{Buf, Bytes};
 
 //  https://datatracker.ietf.org/doc/html/rfc3550#section-5.3.1
@@ -57,10 +52,7 @@ use bytes::{Buf, Bytes};
 //    common length of labels and identifiers, while losing the possibility
 //    of zero-length values, which would often be padded anyway.)
 #[derive(Debug)]
-pub struct OneByteHeaderExtension {
-    pub id: u4,
-    pub data: Vec<u8>,
-}
+pub struct OneByteHeaderExtension(Bytes);
 
 impl OneByteHeaderExtension {
     pub const TYPE: u16 = 0xBEDE;
@@ -68,41 +60,30 @@ impl OneByteHeaderExtension {
     pub fn type_matches(ext_type: u16) -> bool {
         ext_type == Self::TYPE
     }
-}
 
-pub fn parse_one_byte_header_extensions(
-    buf: &mut impl BitRead,
-    length_bytes: u16,
-) -> Result<Vec<OneByteHeaderExtension>> {
-    let mut extensions = Vec::new();
-    let mut bytes_read = 0;
-    let mut i = 0;
-
-    while bytes_read < length_bytes {
-        let id_len = buf.read_u8().with_context(|| format!("id_len-{i}"))?;
-        let id = (id_len & 0xF0) >> 4;
-        // If the id is 0, then the length field is ignored completely; otherwise the
-        // length field represents the number of bytes of the extension data - 1.
-        let ext_data_byte_len = match id {
-            0 => 0,
-            id => {
-                let ext_data_length = (id_len & 0xF) + 1;
-                let mut data = vec![0u8; ext_data_length as usize];
-                buf.read_exact(&mut data)
-                    .with_context(|| format!("data-{i}"))?;
-                extensions.push(OneByteHeaderExtension {
-                    id: u4::new(id),
-                    data,
-                });
-                ext_data_length
-            }
-        };
-        // 1 for the header, then the length
-        bytes_read += 1 + ext_data_byte_len as u16;
-        i += 1;
+    pub fn id(&self) -> u8 {
+        (self.0[0] & 0xF0) >> 4
     }
 
-    Ok(extensions)
+    pub fn data(&self) -> Bytes {
+        self.0.slice(1..)
+    }
+}
+
+pub fn read_one_byte_header_extension(buf: &mut Bytes) -> OneByteHeaderExtension {
+    let id = (buf[0] & 0xF0) >> 4;
+
+    let length_bytes = match id {
+        // A 0 id means we've hit the end of the actual extensions, so consume the rest of the
+        // buffer
+        0 => buf.len() - 1,
+        _ => ((buf[0] & 0xF) + 1) as usize,
+    };
+
+    // TODO: here (and two byte) i think we need to validate against buf.len() before splitting
+    let he = buf.split_to(1 + length_bytes);
+
+    OneByteHeaderExtension(he)
 }
 
 // https://datatracker.ietf.org/doc/html/rfc8285#section-4.3
@@ -150,10 +131,7 @@ pub fn parse_one_byte_header_extensions(
 //    including the ID and length fields.  The value zero (0) indicates
 //    that there is no subsequent data.
 #[derive(Debug)]
-pub struct TwoByteHeaderExtension {
-    pub id: u8,
-    pub data: Vec<u8>,
-}
+pub struct TwoByteHeaderExtension(Bytes);
 
 impl TwoByteHeaderExtension {
     const TYPE_MASK: u16 = 0xFFF0;
@@ -162,87 +140,7 @@ impl TwoByteHeaderExtension {
     pub fn type_matches(ext_type: u16) -> bool {
         (ext_type & Self::TYPE_MASK) == Self::TYPE
     }
-}
 
-pub fn parse_two_byte_header_extensions(
-    buf: &mut impl BitRead,
-    length: u16,
-) -> Result<Vec<TwoByteHeaderExtension>> {
-    let mut extensions = Vec::new();
-    let mut bytes_read = 0;
-    let mut i = 0;
-    while bytes_read < length {
-        let id = buf.read_u8().with_context(|| format!("id-{i}"))?;
-        let length = buf.read_u8().with_context(|| format!("length-{i}"))?;
-        let mut data = vec![0u8; length as usize];
-        if id != 0 {
-            buf.read_exact(&mut data)
-                .with_context(|| format!("data-{i}"))?;
-            extensions.push(TwoByteHeaderExtension { id, data });
-        }
-        bytes_read += 1 + 1 + length as u16;
-        i += 1;
-    }
-    Ok(extensions)
-}
-
-#[derive(Debug)]
-pub enum SomeHeaderExtension {
-    OneByteHeaderExtension(OneByteHeaderExtension),
-    TwoByteHeaderExtension(TwoByteHeaderExtension),
-}
-
-impl SomeHeaderExtension {
-    pub fn has_id(&self, id: u8) -> bool {
-        match self {
-            SomeHeaderExtension::OneByteHeaderExtension(ob) => u8::from(ob.id) == id,
-            SomeHeaderExtension::TwoByteHeaderExtension(tb) => tb.id == id,
-        }
-    }
-
-    pub fn get_id(&self) -> u8 {
-        match self {
-            SomeHeaderExtension::OneByteHeaderExtension(ob) => ob.id.into(),
-            SomeHeaderExtension::TwoByteHeaderExtension(tb) => tb.id,
-        }
-    }
-
-    pub fn get_data(&self) -> &[u8] {
-        match self {
-            SomeHeaderExtension::OneByteHeaderExtension(ob) => &ob.data,
-            SomeHeaderExtension::TwoByteHeaderExtension(tb) => &tb.data,
-        }
-    }
-}
-
-pub fn parse_header_extensions(buf: &mut impl BitRead) -> Result<Vec<SomeHeaderExtension>> {
-    let ext_type = buf.read_u16::<NetworkOrder>().context("extensions type")?;
-    let length_bytes = buf
-        .read_u16::<NetworkOrder>()
-        .context("extensions length")?
-        * 4; // the field is the count of 32 bit words, so multiply by 4 to get the length in bytes
-
-    if TwoByteHeaderExtension::type_matches(ext_type) {
-        Ok(parse_two_byte_header_extensions(buf, length_bytes)
-            .context("two byte header extensions")?
-            .into_iter()
-            .map(SomeHeaderExtension::TwoByteHeaderExtension)
-            .collect())
-    } else if OneByteHeaderExtension::type_matches(ext_type) {
-        Ok(parse_one_byte_header_extensions(buf, length_bytes)
-            .context("one byte header extensions")?
-            .into_iter()
-            .map(SomeHeaderExtension::OneByteHeaderExtension)
-            .collect())
-    } else {
-        panic!("invalid header extension type {ext_type:x}");
-    }
-}
-
-#[derive(Debug)]
-pub struct TwoByteHeaderExtension2(Bytes);
-
-impl TwoByteHeaderExtension2 {
     pub fn id(&self) -> u8 {
         self.0[0]
     }
@@ -253,7 +151,7 @@ impl TwoByteHeaderExtension2 {
 }
 
 /// [`buf`] should start at the beginning of the header extension (the id)
-pub fn read_two_byte_header_extension(buf: &mut Bytes) -> TwoByteHeaderExtension2 {
+pub fn read_two_byte_header_extension(buf: &mut Bytes) -> TwoByteHeaderExtension {
     let id = buf[0];
     let length_bytes = match id {
         0 => 0,
@@ -262,61 +160,32 @@ pub fn read_two_byte_header_extension(buf: &mut Bytes) -> TwoByteHeaderExtension
     // The length field is in the second byte, and the '2' is to account for the id and length
     // field bytes before the actul data
     let he = buf.split_to(2 + length_bytes as usize);
-    TwoByteHeaderExtension2(he)
+    TwoByteHeaderExtension(he)
 }
 
 #[derive(Debug)]
-pub struct OneByteHeaderExtension2(Bytes);
-
-impl OneByteHeaderExtension2 {
-    pub fn id(&self) -> u8 {
-        (self.0[0] & 0xF0) >> 4
-    }
-
-    pub fn data(&self) -> Bytes {
-        self.0.slice(1..)
-    }
+pub enum SomeHeaderExtension {
+    OneByteHeaderExtension(OneByteHeaderExtension),
+    TwoByteHeaderExtension(TwoByteHeaderExtension),
 }
 
-pub fn read_one_byte_header_extension(buf: &mut Bytes) -> OneByteHeaderExtension2 {
-    let id = (buf[0] & 0xF0) >> 4;
-
-    let length_bytes = match id {
-        // A 0 id means we've hit the end of the actual extensions, so consume the rest of the
-        // buffer
-        0 => buf.len() - 1,
-        _ => ((buf[0] & 0xF) + 1) as usize,
-    };
-
-    // TODO: here (and above) i think we need to validate against buf.len() before splitting
-    let he = buf.split_to(1 + length_bytes);
-
-    OneByteHeaderExtension2(he)
-}
-
-#[derive(Debug)]
-pub enum SomeHeaderExtension2 {
-    OneByteHeaderExtension(OneByteHeaderExtension2),
-    TwoByteHeaderExtension(TwoByteHeaderExtension2),
-}
-
-impl SomeHeaderExtension2 {
+impl SomeHeaderExtension {
     pub fn id(&self) -> u8 {
         match self {
-            SomeHeaderExtension2::OneByteHeaderExtension(e) => e.id(),
-            SomeHeaderExtension2::TwoByteHeaderExtension(e) => e.id(),
+            SomeHeaderExtension::OneByteHeaderExtension(e) => e.id(),
+            SomeHeaderExtension::TwoByteHeaderExtension(e) => e.id(),
         }
     }
 
     pub fn data(&self) -> Bytes {
         match self {
-            SomeHeaderExtension2::OneByteHeaderExtension(e) => e.data(),
-            SomeHeaderExtension2::TwoByteHeaderExtension(e) => e.data(),
+            SomeHeaderExtension::OneByteHeaderExtension(e) => e.data(),
+            SomeHeaderExtension::TwoByteHeaderExtension(e) => e.data(),
         }
     }
 }
 
-pub fn read_header_extensions(buf: Bytes) -> HashMap<u8, SomeHeaderExtension2> {
+pub fn read_header_extensions(buf: Bytes) -> HashMap<u8, SomeHeaderExtension> {
     // TODO: should be consistent with use of cursor/bitcursor and Vec<u8> and Bytes
     let mut cursor = Cursor::new(buf);
 
@@ -327,14 +196,14 @@ pub fn read_header_extensions(buf: Bytes) -> HashMap<u8, SomeHeaderExtension2> {
 
     let mut header_extensions_bytes = buf.slice(4..).slice(..length_bytes as usize);
 
-    let mut header_extensions: HashMap<u8, SomeHeaderExtension2> = HashMap::new();
+    let mut header_extensions: HashMap<u8, SomeHeaderExtension> = HashMap::new();
     while !header_extensions_bytes.is_empty() {
         let ext = if TwoByteHeaderExtension::type_matches(ext_type) {
-            SomeHeaderExtension2::TwoByteHeaderExtension(read_two_byte_header_extension(
+            SomeHeaderExtension::TwoByteHeaderExtension(read_two_byte_header_extension(
                 &mut header_extensions_bytes,
             ))
         } else if OneByteHeaderExtension::type_matches(ext_type) {
-            SomeHeaderExtension2::OneByteHeaderExtension(read_one_byte_header_extension(
+            SomeHeaderExtension::OneByteHeaderExtension(read_one_byte_header_extension(
                 &mut header_extensions_bytes,
             ))
         } else {

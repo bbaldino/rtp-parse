@@ -173,6 +173,7 @@ impl TryFrom<u2> for PacketStatusSymbol {
 /// chunk, followed by a symbol size bit and then 7 or 14 symbols,
 /// depending on the size bit.
 ///
+/// ```text
 ///      0                   1
 ///      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
 ///     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -190,6 +191,7 @@ impl TryFrom<u2> for PacketStatusSymbol {
 ///
 /// symbol list:  14 bits A list of packet status symbols, 7 or 14 in
 ///             total.
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusVectorChunk(Vec<PacketStatusSymbol>);
 
@@ -247,7 +249,7 @@ pub fn read_status_vector_chunk<B: PacketBuffer>(
 
 /// A run length chunk starts with 0 bit, followed by a packet status
 /// symbol and the run length of that symbol.
-///
+/// ```text
 ///     0                   1
 ///     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
 ///    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -260,6 +262,7 @@ pub fn read_status_vector_chunk<B: PacketBuffer>(
 ///             See above.
 ///
 /// run length (L):  13 bits An unsigned integer denoting the run length.
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunLengthEncodingChunk {
     pub symbol: PacketStatusSymbol,

@@ -1,13 +1,14 @@
-use std::{collections::HashMap, fmt::Debug, io::Write, ops::Range};
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Display},
+};
 
 use anyhow::Result;
-use bitcursor::{bit_cursor::BitCursor, ux::u7};
-use bytes::{Bytes, BytesMut};
+use bitcursor::ux::u7;
+use bytes::BytesMut;
 
 use super::{
-    header_extensions::{
-        parse_header_extensions, read_header_extensions, SomeHeaderExtension, SomeHeaderExtension2,
-    },
+    header_extensions::{read_header_extensions, SomeHeaderExtension},
     rtp_header::RtpHeader,
 };
 
@@ -28,99 +29,27 @@ use super::{
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// |                   payload                                     |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#[derive(Debug)]
 pub struct RtpPacket {
-    buf: Vec<u8>,
-    header_extensions: Vec<SomeHeaderExtension>,
-    pending_header_extension_ops: Vec<PendingHeaderExtensionOperation>,
-    payload: SliceDesc,
+    // Includes the fixed header and csrcs
+    header: BytesMut,
+    header_exts_buf: BytesMut,
+    parsed_header_extensions: HashMap<u8, SomeHeaderExtension>,
+    payload: BytesMut,
+}
+
+impl Display for RtpPacket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:x?}", self.payload.as_ref())
+    }
 }
 
 impl RtpPacket {
     pub fn payload_type(&self) -> u7 {
-        RtpHeader::payload_type(&self.buf)
-    }
-
-    pub fn payload(&self) -> &[u8] {
-        &self.buf[self.payload.range()]
-    }
-
-    pub fn get_extension_by_id(&self, id: u8) -> Option<&SomeHeaderExtension> {
-        self.header_extensions.iter().find(|e| e.has_id(id))
-    }
-
-    /// Return the original size of this packet in bytes.
-    pub fn size_bytes(&self) -> u32 {
-        self.buf.len() as u32
-    }
-}
-
-impl Debug for RtpPacket {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "extensions: {:x?}\npayload: {:x?}",
-            self.header_extensions,
-            self.payload()
-        )
-    }
-}
-
-#[derive(Debug)]
-enum PendingHeaderExtensionOperation {
-    Remove {
-        id: u8,
-    },
-    Add {
-        ext: super::header_extensions::SomeHeaderExtension,
-    },
-}
-
-struct SliceDesc {
-    offset: usize,
-    length: usize,
-}
-
-impl SliceDesc {
-    fn range(&self) -> Range<usize> {
-        self.offset..(self.offset + self.length)
-    }
-}
-
-pub fn read_rtp_packet(buf: Vec<u8>) -> Result<RtpPacket> {
-    let mut bit_cursor = BitCursor::new(&buf[RtpHeader::extensions_start_offset(&buf)..]);
-    let header_extensions = parse_header_extensions(&mut bit_cursor).unwrap();
-
-    let payload_start = RtpHeader::payload_offset(&buf);
-    let payload_length = buf.len() - payload_start;
-    let payload_slice = SliceDesc {
-        offset: payload_start,
-        length: payload_length,
-    };
-
-    Ok(RtpPacket {
-        buf,
-        header_extensions,
-        pending_header_extension_ops: Vec::new(),
-        payload: payload_slice,
-    })
-}
-
-#[derive(Debug)]
-pub struct RtpPacket2 {
-    // Includes the fixed header and csrcs
-    header: BytesMut,
-    header_exts_buf: BytesMut,
-    parsed_header_extensions: HashMap<u8, SomeHeaderExtension2>,
-    payload: BytesMut,
-    pending_header_extension_ops: Vec<PendingHeaderExtensionOperation>,
-}
-
-impl RtpPacket2 {
-    pub fn payload_type(&self) -> u7 {
         RtpHeader::payload_type(&self.header)
     }
 
-    pub fn get_extension_by_id(&self, id: u8) -> Option<&SomeHeaderExtension2> {
+    pub fn get_extension_by_id(&self, id: u8) -> Option<&SomeHeaderExtension> {
         self.parsed_header_extensions.get(&id)
     }
 
@@ -132,7 +61,7 @@ impl RtpPacket2 {
     }
 }
 
-pub fn read_rtp_packet2(buf: Vec<u8>) -> Result<RtpPacket2> {
+pub fn read_rtp_packet(buf: Vec<u8>) -> Result<RtpPacket> {
     // TODO: eventaully I think we'll have it where this was already a BytesMut type and we don't
     // have to copy it here
     let mut bytes = BytesMut::with_capacity(buf.len());
@@ -145,18 +74,17 @@ pub fn read_rtp_packet2(buf: Vec<u8>) -> Result<RtpPacket2> {
     let header_exts = bytes.split_to(header_extensions_length_bytes as usize);
     let parsed_header_extensions = read_header_extensions(header_exts.clone().into());
 
-    Ok(RtpPacket2 {
+    Ok(RtpPacket {
         header,
         header_exts_buf: header_exts,
         parsed_header_extensions,
         payload: bytes,
-        pending_header_extension_ops: Vec::new(),
     })
 }
 
 #[cfg(test)]
 mod test {
-    use super::read_rtp_packet2;
+    use super::read_rtp_packet;
 
     #[test]
     fn test_read_rtp_packet2() {
@@ -168,7 +96,7 @@ mod test {
             0x98, 0xee, 0x62, 0xcb, 0x60, 0xff, 0x6c, 0x1b, 0x29, 0x00,
         ];
 
-        let packet = read_rtp_packet2(data).unwrap();
+        let packet = read_rtp_packet(data).unwrap();
         println!("{:x?}", packet.header.as_ref());
         println!("{:x?}", packet.header_exts_buf.as_ref());
         println!("{:?}", packet.parsed_header_extensions);
