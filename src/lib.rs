@@ -4,7 +4,7 @@ use std::{
     ops::Range,
 };
 
-use bitcursor::{bit_cursor::BitCursor, bit_read::BitRead, bit_write::BitWrite};
+use bit_cursor::{bit_cursor::BitCursor, bit_read::BitRead, bit_write::BitWrite};
 use bitvec::{order::Msb0, slice::BitSlice, vec::BitVec};
 
 pub mod rtcp;

@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
-use bitcursor::bit_write::BitWrite;
-use bitcursor::bit_write_exts::BitWriteExts;
-use bitcursor::ux::*;
-use bitcursor::{bit_read::BitRead, bit_read_exts::BitReadExts, byte_order::NetworkOrder};
+use bit_cursor::{
+    bit_read::BitRead, bit_read_exts::BitReadExts, bit_write::BitWrite,
+    bit_write_exts::BitWriteExts, byte_order::NetworkOrder, nsw_types::*,
+};
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.4.1
 ///         0                   1                   2                   3

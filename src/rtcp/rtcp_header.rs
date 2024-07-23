@@ -1,9 +1,9 @@
 use std::fmt::{Debug, LowerHex};
 
 use anyhow::{anyhow, Context, Result};
-use bitcursor::{
+use bit_cursor::{
     bit_read::BitRead, bit_read_exts::BitReadExts, bit_write::BitWrite,
-    bit_write_exts::BitWriteExts, byte_order::NetworkOrder, ux::*,
+    bit_write_exts::BitWriteExts, byte_order::NetworkOrder, nsw_types::*,
 };
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.1
@@ -71,7 +71,7 @@ pub fn write_rtcp_header<W: BitWrite>(buf: &mut W, header: &RtcpHeader) -> Resul
 #[cfg(test)]
 #[allow(clippy::unusual_byte_groupings, clippy::bool_assert_comparison)]
 mod tests {
-    use bitcursor::bit_cursor::BitCursor;
+    use bit_cursor::bit_cursor::BitCursor;
     use bitvec::{order::Msb0, vec::BitVec};
 
     use super::*;

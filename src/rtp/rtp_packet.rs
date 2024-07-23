@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::Result;
-use bitcursor::ux::u7;
+use bit_cursor::nsw_types::u7;
 use bytes::BytesMut;
 
 use super::{

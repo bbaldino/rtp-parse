@@ -1,10 +1,10 @@
 use crate::{PacketBuffer, PacketBufferMut};
 use anyhow::{bail, Context, Result};
-use bitcursor::{
+use bit_cursor::{
     bit_read_exts::BitReadExts,
     bit_write_exts::BitWriteExts,
     byte_order::NetworkOrder,
-    ux::{u24, u5},
+    nsw_types::{u24, u5},
 };
 
 use super::{

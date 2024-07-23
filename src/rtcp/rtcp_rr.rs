@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use bitcursor::{
+use bit_cursor::{
     bit_read::BitRead, bit_read_exts::BitReadExts, bit_write::BitWrite,
     bit_write_exts::BitWriteExts, byte_order::NetworkOrder,
 };

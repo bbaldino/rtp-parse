@@ -1,7 +1,7 @@
 use std::str::from_utf8;
 
 use anyhow::{Context, Result};
-use bitcursor::{
+use bit_cursor::{
     bit_read::BitRead, bit_read_exts::BitReadExts, bit_write::BitWrite,
     bit_write_exts::BitWriteExts, byte_order::NetworkOrder,
 };
@@ -88,7 +88,7 @@ pub fn write_rtcp_bye<W: BitWrite>(buf: &mut W, packet: &RtcpByePacket) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use bitcursor::{bit_cursor::BitCursor, ux::*};
+    use bit_cursor::{bit_cursor::BitCursor, nsw_types::*};
     use bitvec::{order::Msb0, vec::BitVec};
 
     use super::*;

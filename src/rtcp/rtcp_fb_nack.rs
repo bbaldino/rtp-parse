@@ -5,8 +5,9 @@ use crate::{
     PacketBuffer, PacketBufferMut,
 };
 use anyhow::{anyhow, bail, Context, Result};
-use bitcursor::{
-    bit_read_exts::BitReadExts, bit_write_exts::BitWriteExts, byte_order::NetworkOrder, ux::u5,
+use bit_cursor::{
+    bit_read_exts::BitReadExts, bit_write_exts::BitWriteExts, byte_order::NetworkOrder,
+    nsw_types::u5,
 };
 
 use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader};
@@ -153,7 +154,7 @@ impl ChunkByMaxDifference<u16> for BTreeSet<u16> {
 mod test {
     use std::collections::BTreeSet;
 
-    use bitcursor::bit_cursor::BitCursor;
+    use bit_cursor::bit_cursor::BitCursor;
     use bitvec::{order::Msb0, vec::BitVec};
 
     use super::{read_nack_block, write_nack_block};

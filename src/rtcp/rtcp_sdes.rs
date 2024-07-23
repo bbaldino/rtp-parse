@@ -1,7 +1,7 @@
 use std::str::from_utf8;
 
 use anyhow::{Context, Result};
-use bitcursor::{
+use bit_cursor::{
     bit_read_exts::BitReadExts, bit_write_exts::BitWriteExts, byte_order::NetworkOrder,
 };
 
@@ -163,9 +163,9 @@ pub fn write_sdes_chunk<W: PacketBufferMut>(buf: &mut W, sdes_chunk: &SdesChunk)
 
 #[cfg(test)]
 mod tests {
-    use bitcursor::{
+    use bit_cursor::{
         bit_cursor::BitCursor,
-        ux::{u2, u5},
+        nsw_types::{u2, u5},
     };
     use bitvec::{order::Msb0, vec::BitVec};
 
@@ -188,7 +188,7 @@ mod tests {
         let sdes_item = read_sdes_item(&mut buf).unwrap();
         match sdes_item {
             SdesItem::Cname(v) => assert_eq!(v, str),
-            _ => assert!(false, "Wrong SdesItem type"),
+            _ => panic!("Wrong SdesItem type"),
         }
     }
 

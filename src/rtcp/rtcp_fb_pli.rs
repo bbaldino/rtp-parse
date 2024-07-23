@@ -6,7 +6,7 @@ use super::{
     rtcp_fb_header::{write_rtcp_fb_header, RtcpFbHeader},
     rtcp_header::{write_rtcp_header, RtcpHeader},
 };
-use bitcursor::ux::u5;
+use bit_cursor::nsw_types::u5;
 
 ///
 /// https://tools.ietf.org/html/rfc4585#section-6.3.1

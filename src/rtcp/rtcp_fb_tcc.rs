@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
-use bitcursor::{bit_read_exts::BitReadExts, byte_order::NetworkOrder, ux::*};
+use bit_cursor::{bit_read_exts::BitReadExts, byte_order::NetworkOrder, nsw_types::*};
 
 use crate::{util::consume_padding, PacketBuffer};
 
@@ -382,7 +382,7 @@ fn read_some_packet_status_chunk<B: PacketBuffer>(
 
 #[cfg(test)]
 mod test {
-    use bitcursor::bit_cursor::BitCursor;
+    use bit_cursor::bit_cursor::BitCursor;
     use bitvec::{bits, order::Msb0};
 
     use crate::rtcp::rtcp_fb_tcc::PacketStatusSymbol;

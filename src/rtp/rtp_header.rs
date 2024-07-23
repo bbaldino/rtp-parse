@@ -1,7 +1,7 @@
 use std::io::Seek;
 
-use bitcursor::{
-    bit_cursor::BitCursor, bit_read_exts::BitReadExts, byte_order::NetworkOrder, ux::*,
+use bit_cursor::{
+    bit_cursor::BitCursor, bit_read_exts::BitReadExts, byte_order::NetworkOrder, nsw_types::*,
 };
 
 /// * https://tools.ietf.org/html/rfc3550#section-5.1
