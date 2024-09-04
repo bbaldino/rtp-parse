@@ -63,6 +63,17 @@ pub fn read_rtcp_fb_tcc<B: PacketBuffer>(
     header: RtcpHeader,
     fb_header: RtcpFbHeader,
 ) -> Result<RtcpFbTccPacket> {
+    let (packet_reports, reference_time, feedback_packet_count) = read_rtcp_fb_tcc_data(buf)?;
+    Ok(RtcpFbTccPacket {
+        header,
+        fb_header,
+        packet_reports,
+        reference_time,
+        feedback_packet_count,
+    })
+}
+
+fn read_rtcp_fb_tcc_data<B: PacketBuffer>(buf: &mut B) -> Result<(Vec<PacketReport>, u24, u8)> {
     let base_seq_num = buf.read_u16::<NetworkOrder>().context("base seq num")?;
     let packet_status_count = buf
         .read_u16::<NetworkOrder>()
@@ -97,7 +108,6 @@ pub fn read_rtcp_fb_tcc<B: PacketBuffer>(
                     });
                 }
                 2 => {
-                    // TODO: will the 'as' cast handle the negative delta correctly?
                     let delta_ticks = buf
                         .read_u16::<NetworkOrder>()
                         .with_context(|| format!("delta ticks for packet {curr_seq_num}"))?
@@ -113,13 +123,7 @@ pub fn read_rtcp_fb_tcc<B: PacketBuffer>(
         }
     }
     consume_padding(buf);
-    Ok(RtcpFbTccPacket {
-        header,
-        fb_header,
-        packet_reports,
-        reference_time,
-        feedback_packet_count,
-    })
+    Ok((packet_reports, reference_time, feedback_packet_count))
 }
 
 #[derive(Debug, PartialEq)]
@@ -382,12 +386,12 @@ fn read_some_packet_status_chunk<B: PacketBuffer>(
 
 #[cfg(test)]
 mod test {
-    use bit_cursor::bit_cursor::BitCursor;
-    use bitvec::{bits, order::Msb0};
+    use bit_cursor::{bit_cursor::BitCursor, nsw_types::u24};
+    use bitvec::{bits, order::Msb0, vec::BitVec};
 
-    use crate::rtcp::rtcp_fb_tcc::PacketStatusSymbol;
+    use crate::rtcp::rtcp_fb_tcc::{PacketReport, PacketStatusSymbol};
 
-    use super::read_status_vector_chunk;
+    use super::{read_rtcp_fb_tcc_data, read_status_vector_chunk};
 
     #[test]
     fn test_sv_chunk_1_bit_symbols() {
@@ -457,6 +461,58 @@ mod test {
             ]
         );
     }
-}
 
-// TODO: look at packet 96 in wireshark trace and use that for a test case
+    #[test]
+    fn test_read_tcc_fb_data() {
+        #[rustfmt::skip]
+        let data_buf = [
+            0x01, 0x81, 0x00, 0x08, 0x19, 0xae, 0xe8, 0x45,
+            0xd9, 0x55, 0x20, 0x01, 0xa8, 0xff, 0xfc, 0x04,
+            0x00, 0x50, 0x04, 0x00, 0x00, 0x00, 0x00, 00
+        ];
+        let mut cursor = BitCursor::new(BitVec::<u8, Msb0>::from_slice(&data_buf));
+        let (packet_reports, reference_time, feedback_packet_count) =
+            read_rtcp_fb_tcc_data(&mut cursor).unwrap();
+
+        assert_eq!(reference_time, u24::new(1683176));
+        assert_eq!(feedback_packet_count, 69);
+        assert_eq!(
+            packet_reports,
+            [
+                PacketReport::ReceivedPacketSmallDelta {
+                    seq_num: 385,
+                    delta_ticks: 168,
+                },
+                PacketReport::ReceivedPacketLargeOrNegativeDelta {
+                    seq_num: 386,
+                    delta_ticks: -4,
+                },
+                PacketReport::ReceivedPacketSmallDelta {
+                    seq_num: 387,
+                    delta_ticks: 4,
+                },
+                PacketReport::ReceivedPacketSmallDelta {
+                    seq_num: 388,
+                    delta_ticks: 0,
+                },
+                PacketReport::ReceivedPacketSmallDelta {
+                    seq_num: 389,
+                    delta_ticks: 80,
+                },
+                PacketReport::ReceivedPacketSmallDelta {
+                    seq_num: 390,
+                    delta_ticks: 4,
+                },
+                PacketReport::ReceivedPacketSmallDelta {
+                    seq_num: 391,
+                    delta_ticks: 0,
+                },
+                PacketReport::ReceivedPacketSmallDelta {
+                    seq_num: 392,
+                    delta_ticks: 0,
+                },
+            ]
+        );
+        dbg!(packet_reports);
+    }
+}
