@@ -49,6 +49,10 @@ impl RtpPacket {
         RtpHeader::payload_type(&self.header)
     }
 
+    pub fn ssrc(&self) -> u32 {
+        RtpHeader::ssrc(&self.header)
+    }
+
     pub fn get_extension_by_id(&self, id: u8) -> Option<&SomeHeaderExtension> {
         self.parsed_header_extensions.get(&id)
     }
