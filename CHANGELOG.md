@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/bbaldino/rtp-parse/compare/v0.1.0...v0.1.1) - 2024-09-06
+
+### Other
+- release ([#1](https://github.com/bbaldino/rtp-parse/pull/1))
+
 ## [0.1.0](https://github.com/bbaldino/rtp-parse/releases/tag/v0.1.0) - 2024-09-06
 
 ### Other
