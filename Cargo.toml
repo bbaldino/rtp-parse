@@ -1,7 +1,14 @@
 [package]
-name = "rtp-rs"
+name = "rtp-parse"
 version = "0.1.0"
+authors = ["Brian Baldino <bbaldino@gmail.com> "]
 edition = "2021"
+
+description = "RTP packet library"
+
+license = "Apache-2.0/MIT"
+readme = "README.md"
+repository = "https://github.com/bbaldino/rtp-parse.git"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
