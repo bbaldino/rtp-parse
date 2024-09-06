@@ -1,14 +1,17 @@
 use anyhow::{anyhow, bail, Context, Result};
-use bit_cursor::{bit_read_exts::BitReadExts, byte_order::NetworkOrder, nsw_types::*};
+use bit_cursor::{
+    bit_read_exts::BitReadExts,
+    byte_order::NetworkOrder,
+    nsw_types::{
+        num_traits::{ConstOne, ConstZero},
+        *,
+    },
+};
 
 use crate::{util::consume_padding, PacketBuffer};
 
 use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader};
 
-const U1_ZERO: u1 = u1::new(0);
-const U1_ONE: u1 = u1::new(1);
-const U2_ZERO: u2 = u2::new(0);
-const U2_ONE: u2 = u2::new(1);
 const U2_TWO: u2 = u2::new(2);
 
 /// https://datatracker.ietf.org/doc/html/draft-holmer-rmcat-transport-wide-cc-extensions-01#section-3.1
@@ -153,8 +156,8 @@ impl PacketStatusSymbol {
 impl From<u1> for PacketStatusSymbol {
     fn from(value: u1) -> Self {
         match value {
-            U1_ZERO => PacketStatusSymbol::NotReceived,
-            U1_ONE => PacketStatusSymbol::ReceivedSmallDelta,
+            u1::ZERO => PacketStatusSymbol::NotReceived,
+            u1::ONE => PacketStatusSymbol::ReceivedSmallDelta,
             _ => unreachable!(),
         }
     }
@@ -165,8 +168,8 @@ impl TryFrom<u2> for PacketStatusSymbol {
 
     fn try_from(value: u2) -> std::prelude::v1::Result<Self, Self::Error> {
         match value {
-            U2_ZERO => Ok(PacketStatusSymbol::NotReceived),
-            U2_ONE => Ok(PacketStatusSymbol::ReceivedSmallDelta),
+            u2::ZERO => Ok(PacketStatusSymbol::NotReceived),
+            u2::ONE => Ok(PacketStatusSymbol::ReceivedSmallDelta),
             U2_TWO => Ok(PacketStatusSymbol::ReceivedLargeOrNegativeDelta),
             pss => Err(anyhow!("Invalid 2 bit packet status symbol: {pss}")),
         }
@@ -217,7 +220,7 @@ pub fn read_status_vector_chunk<B: PacketBuffer>(
 ) -> Result<StatusVectorChunk> {
     let symbol_size = buf.read_u1().context("symbol size")?;
     let mut packet_status_symbols = match symbol_size {
-        U1_ZERO => {
+        u1::ZERO => {
             // 1 bit symbols
             (0..14)
                 .map(|i| {
@@ -228,7 +231,7 @@ pub fn read_status_vector_chunk<B: PacketBuffer>(
                 .collect::<Result<Vec<PacketStatusSymbol>>>()
                 .context("1 bit packet status symbols")
         }
-        U1_ONE => {
+        u1::ONE => {
             // 2 bit symbols
             (0..7)
                 .map(|i| {
@@ -374,10 +377,10 @@ fn read_some_packet_status_chunk<B: PacketBuffer>(
 ) -> Result<SomePacketStatusChunk> {
     let chunk_type = buf.read_u1().context("chunk type")?;
     match chunk_type {
-        U1_ZERO => read_run_length_encoding_chunk(buf)
+        u1::ZERO => read_run_length_encoding_chunk(buf)
             .map(SomePacketStatusChunk::RunLengthEncodingChunk)
             .context("run length encoding chunk"),
-        U1_ONE => read_status_vector_chunk(buf, max_symbol_count)
+        u1::ONE => read_status_vector_chunk(buf, max_symbol_count)
             .map(SomePacketStatusChunk::StatusVectorChunk)
             .context("status vector chunk"),
         _ => unreachable!(),
