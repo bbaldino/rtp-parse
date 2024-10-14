@@ -154,7 +154,7 @@ impl PacketStatusSymbol {
         }
     }
 
-    fn delta_size_bytes(&self) -> usize {
+    pub(crate) fn delta_size_bytes(&self) -> u8 {
         match self {
             PacketStatusSymbol::NotReceived => 0,
             PacketStatusSymbol::ReceivedSmallDelta => 1,
@@ -422,7 +422,7 @@ impl Iterator for SomePacketStatusChunkIterator {
 }
 
 impl SomePacketStatusChunk {
-    fn num_symbols(&self) -> u16 {
+    pub(crate) fn num_symbols(&self) -> u16 {
         match self {
             SomePacketStatusChunk::StatusVectorChunk(svc) => svc.0.len() as u16,
             SomePacketStatusChunk::RunLengthEncodingChunk(rlec) => rlec.run_length.into(),
