@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use anyhow::{anyhow, bail, Context, Result};
 use bit_cursor::{
     bit_read_exts::BitReadExts,
@@ -11,7 +13,7 @@ use bit_cursor::{
 
 use crate::{util::consume_padding, PacketBuffer, PacketBufferMut};
 
-use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader};
+use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader, tcc::chunk::Chunk};
 
 const U2_TWO: u2 = u2::new(2);
 
@@ -130,11 +132,111 @@ fn read_rtcp_fb_tcc_data<B: PacketBuffer>(buf: &mut B) -> Result<(Vec<PacketRepo
     Ok((packet_reports, reference_time, feedback_packet_count))
 }
 
+enum SomeRecvDelta {
+    Small(u8),
+    LargeOrNegative(i16),
+}
+
+fn write_some_recv_delta<B: PacketBufferMut>(buf: &mut B, delta: SomeRecvDelta) -> Result<()> {
+    match delta {
+        SomeRecvDelta::Small(d) => Ok(buf.write_u8(d)?),
+        // TODO: need support for writing a signed int here
+        SomeRecvDelta::LargeOrNegative(d) => Ok(buf.write_u16::<NetworkOrder>(d as u16)?),
+    }
+}
+
+fn foo(packet_reports: &[PacketReport]) -> (u8, Vec<SomePacketStatusChunk>, Vec<SomeRecvDelta>) {
+    let mut expected_seq_num = packet_reports[0].seq_num();
+    let mut chunks: Vec<SomePacketStatusChunk> = vec![];
+    let mut deltas: Vec<SomeRecvDelta> = vec![];
+    let mut curr_chunk = Chunk::default();
+    let mut seq_num_count = 0u8;
+    for packet_report in packet_reports {
+        while expected_seq_num != packet_report.seq_num() {
+            if !curr_chunk.can_add(PacketStatusSymbol::NotReceived) {
+                chunks.push(curr_chunk.emit());
+            }
+            curr_chunk.add(PacketStatusSymbol::NotReceived);
+            expected_seq_num = expected_seq_num.wrapping_add(1);
+            seq_num_count = seq_num_count.wrapping_add(1);
+        }
+
+        if !curr_chunk.can_add(packet_report.symbol()) {
+            chunks.push(curr_chunk.emit());
+        }
+        match packet_report {
+            PacketReport::UnreceivedPacket { .. } => (),
+            PacketReport::ReceivedPacketSmallDelta { delta_ticks, .. } => {
+                deltas.push(SomeRecvDelta::Small(*delta_ticks))
+            }
+            PacketReport::ReceivedPacketLargeOrNegativeDelta { delta_ticks, .. } => {
+                deltas.push(SomeRecvDelta::LargeOrNegative(*delta_ticks))
+            }
+        }
+
+        expected_seq_num = expected_seq_num.wrapping_add(1);
+        seq_num_count = seq_num_count.wrapping_add(1);
+    }
+    chunks.push(curr_chunk.emit());
+
+    (seq_num_count, chunks, deltas)
+}
+
+fn write_rtcp_fb_tcc_data<B: PacketBufferMut>(
+    buf: &mut B,
+    packet_reports: Vec<PacketReport>,
+    reference_time: u24,
+) -> Result<()> {
+    let base_seq_num = packet_reports[0].seq_num();
+    buf.write_u16::<NetworkOrder>(base_seq_num)
+        .context("base seq num")?;
+    buf.write_u16::<NetworkOrder>(packet_reports.len() as u16)
+        .context("packet status count")?;
+    // TODO: use some relative/arbitrary start time instead? Or we could calculate ref time from
+    // the first delta time...
+    buf.write_u24::<NetworkOrder>(reference_time)
+        .context("reference time")?;
+
+    let (feedback_packet_count, chunks, deltas) = foo(&packet_reports);
+    buf.write_u8(feedback_packet_count)
+        .context("feedback packet count")?;
+
+    for chunk in chunks {
+        write_some_packet_status_chunk(chunk, buf).context("packet status chunk")?;
+    }
+
+    for delta in deltas {
+        write_some_recv_delta(buf, delta).context("delta")?;
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, PartialEq)]
 pub enum PacketReport {
     UnreceivedPacket { seq_num: u16 },
     ReceivedPacketSmallDelta { seq_num: u16, delta_ticks: u8 },
     ReceivedPacketLargeOrNegativeDelta { seq_num: u16, delta_ticks: i16 },
+}
+
+impl PacketReport {
+    fn seq_num(&self) -> u16 {
+        match self {
+            Self::UnreceivedPacket { seq_num } => *seq_num,
+            Self::ReceivedPacketSmallDelta { seq_num, .. } => *seq_num,
+            Self::ReceivedPacketLargeOrNegativeDelta { seq_num, .. } => *seq_num,
+        }
+    }
+
+    fn symbol(&self) -> PacketStatusSymbol {
+        match self {
+            PacketReport::UnreceivedPacket { .. } => PacketStatusSymbol::NotReceived,
+            PacketReport::ReceivedPacketSmallDelta { .. } => PacketStatusSymbol::ReceivedSmallDelta,
+            PacketReport::ReceivedPacketLargeOrNegativeDelta { .. } => {
+                PacketStatusSymbol::ReceivedLargeOrNegativeDelta
+            }
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
