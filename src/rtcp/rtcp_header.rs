@@ -20,13 +20,16 @@ use parsely::*;
 ///   zero a valid length and avoids a possible infinite loop in
 ///   scanning a compound RTCP packet, while counting 32-bit words
 ///   avoids a validity check for a multiple of 4.)
-#[derive(Debug, PartialEq, Eq, ParselyRead, ParselyWrite)]
+#[derive(Clone, Debug, PartialEq, Eq, ParselyRead, ParselyWrite)]
+#[parsely_write(sync_args("payload_length_bytes: u16", "num_ssrcs: usize"))]
 pub struct RtcpHeader {
     #[parsely(assertion = "|v: &u2| *v == 2")]
     pub version: u2,
     pub has_padding: bool,
+    #[parsely_write(sync_func = "ParselyResult::Ok(u5::new(num_ssrcs as u8))")]
     pub report_count: u5,
     pub packet_type: u8,
+    #[parsely_write(sync_func = "ParselyResult::Ok(payload_length_bytes / 4)")]
     pub length_field: u16,
 }
 

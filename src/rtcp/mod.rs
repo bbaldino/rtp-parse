@@ -1,4 +1,4 @@
-// pub mod rtcp_bye;
+pub mod rtcp_bye;
 // pub mod rtcp_fb_fir;
 // pub mod rtcp_fb_header;
 // pub mod rtcp_fb_nack;
