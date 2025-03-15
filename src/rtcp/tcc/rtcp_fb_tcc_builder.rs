@@ -1,6 +1,8 @@
 use std::time::Instant;
 
-use crate::rtcp::rtcp_fb_tcc::{PacketStatusSymbol, SomePacketStatusChunk};
+use anyhow::Result;
+
+use crate::rtcp::rtcp_fb_tcc::{PacketStatusSymbol, RtcpFbTccPacket, SomePacketStatusChunk};
 
 use super::chunk::Chunk;
 
@@ -25,6 +27,8 @@ impl RtcpFbTccBuilder {
         }
     }
 
+    // Note that packets here should have sequence numbers passed _in order_ (i.e. packets received
+    // but received out-of-order should have already been sorted into place)
     pub fn add_received_packet(&mut self, tcc_seq_num: u16, receive_timestamp: Instant) -> bool {
         let delta = receive_timestamp.duration_since(self.last_timestamp);
         let delta_ticks = delta.as_micros() / 250;
@@ -46,5 +50,19 @@ impl RtcpFbTccBuilder {
         }
 
         true
+    }
+
+    pub fn build(self) -> Result<RtcpFbTccPacket> {
+        // TODO: It doesn't seem right to just generate PacketReports here...we have to do the
+        // chunks above to see what can 'fit' and what can't...so I think we should change the
+        // RtcpFbTccPacket to hold the chunks and deltas and then add a helper to convert that to
+        // PacketReports
+        Ok(RtcpFbTccPacket {
+            header: todo!(),
+            fb_header: todo!(),
+            packet_reports: todo!(),
+            reference_time: todo!(),
+            feedback_packet_count: todo!(),
+        })
     }
 }

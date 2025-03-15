@@ -13,7 +13,11 @@ use bit_cursor::{
 
 use crate::{util::consume_padding, PacketBuffer, PacketBufferMut};
 
-use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader, tcc::chunk::Chunk};
+use super::{
+    rtcp_fb_header::{write_rtcp_fb_header, RtcpFbHeader},
+    rtcp_header::{write_rtcp_header, RtcpHeader},
+    tcc::chunk::Chunk,
+};
 
 const U2_TWO: u2 = u2::new(2);
 
@@ -55,7 +59,8 @@ const U2_TWO: u2 = u2::new(2);
 pub struct RtcpFbTccPacket {
     pub header: RtcpHeader,
     pub fb_header: RtcpFbHeader,
-    pub packet_reports: Vec<PacketReport>,
+    pub chunks: Vec<SomePacketStatusChunk>,
+    pub deltas: Vec<SomeRecvDelta>,
     pub reference_time: u24,
     pub feedback_packet_count: u8,
 }
@@ -69,14 +74,26 @@ pub fn read_rtcp_fb_tcc<B: PacketBuffer>(
     header: RtcpHeader,
     fb_header: RtcpFbHeader,
 ) -> Result<RtcpFbTccPacket> {
-    let (packet_reports, reference_time, feedback_packet_count) = read_rtcp_fb_tcc_data(buf)?;
-    Ok(RtcpFbTccPacket {
-        header,
-        fb_header,
-        packet_reports,
-        reference_time,
-        feedback_packet_count,
-    })
+    let base_seq_num = buf.read_u16::<NetworkOrder>().context("base seq num")?;
+    let packet_status_count = buf
+        .read_u16::<NetworkOrder>()
+        .context("packet status count")?;
+    let reference_time = buf.read_u24::<NetworkOrder>().context("reference time")?;
+    let feedback_packet_count = buf.read_u8().context("feedback packet count")?;
+
+    let mut num_status_remaining = packet_status_count;
+
+    let mut chunks: Vec<SomePacketStatusChunk> = vec![];
+    while num_status_remaining > 0 {
+        let chunk = read_some_packet_status_chunk(buf, num_status_remaining as usize)
+            .context("packet status chunk")?;
+        num_status_remaining -= chunk.num_symbols();
+        chunks.push(chunk);
+    }
+    let mut deltas: Vec<SomeRecvDelta> = vec![];
+    // how should we know how many deltas to read? iterate over all symbols? or track them as we
+    // parse the symbols into chunks?
+    todo!()
 }
 
 fn read_rtcp_fb_tcc_data<B: PacketBuffer>(buf: &mut B) -> Result<(Vec<PacketReport>, u24, u8)> {
@@ -132,6 +149,7 @@ fn read_rtcp_fb_tcc_data<B: PacketBuffer>(buf: &mut B) -> Result<(Vec<PacketRepo
     Ok((packet_reports, reference_time, feedback_packet_count))
 }
 
+#[derive(Debug)]
 enum SomeRecvDelta {
     Small(u8),
     LargeOrNegative(i16),
@@ -145,7 +163,49 @@ fn write_some_recv_delta<B: PacketBufferMut>(buf: &mut B, delta: SomeRecvDelta) 
     }
 }
 
-fn foo(packet_reports: &[PacketReport]) -> (u8, Vec<SomePacketStatusChunk>, Vec<SomeRecvDelta>) {
+fn write_rtcp_fb_tcc<B: PacketBufferMut>(buf: &mut B, fb_tcc: &RtcpFbTccPacket) -> Result<()> {
+    write_rtcp_header(buf, &fb_tcc.header).context("rtcp header")?;
+    write_rtcp_fb_header(buf, &fb_tcc.fb_header).context("fb header")?;
+
+    write_rtcp_fb_tcc_data(buf, &fb_tcc.packet_reports, fb_tcc.reference_time)
+        .context("fb tcc data")?;
+
+    Ok(())
+}
+
+/// Write the FB TCC packet data.  Note that `packet_reports` should be a _continuous_ set of
+/// reports: all NotReceived values should have already been inserted.
+fn write_rtcp_fb_tcc_data<B: PacketBufferMut>(
+    buf: &mut B,
+    packet_reports: &[PacketReport],
+    reference_time: u24,
+) -> Result<()> {
+    let base_seq_num = packet_reports[0].seq_num();
+    buf.write_u16::<NetworkOrder>(base_seq_num)
+        .context("base seq num")?;
+    buf.write_u16::<NetworkOrder>(packet_reports.len() as u16)
+        .context("packet status count")?;
+    buf.write_u24::<NetworkOrder>(reference_time)
+        .context("reference time")?;
+
+    let (feedback_packet_count, chunks, deltas) = prepare_packet_reports(&packet_reports);
+    buf.write_u8(feedback_packet_count)
+        .context("feedback packet count")?;
+
+    for chunk in chunks {
+        write_some_packet_status_chunk(chunk, buf).context("packet status chunk")?;
+    }
+
+    for delta in deltas {
+        write_some_recv_delta(buf, delta).context("delta")?;
+    }
+
+    Ok(())
+}
+
+fn prepare_packet_reports(
+    packet_reports: &[PacketReport],
+) -> (u8, Vec<SomePacketStatusChunk>, Vec<SomeRecvDelta>) {
     let mut expected_seq_num = packet_reports[0].seq_num();
     let mut chunks: Vec<SomePacketStatusChunk> = vec![];
     let mut deltas: Vec<SomeRecvDelta> = vec![];
@@ -180,36 +240,6 @@ fn foo(packet_reports: &[PacketReport]) -> (u8, Vec<SomePacketStatusChunk>, Vec<
     chunks.push(curr_chunk.emit());
 
     (seq_num_count, chunks, deltas)
-}
-
-fn write_rtcp_fb_tcc_data<B: PacketBufferMut>(
-    buf: &mut B,
-    packet_reports: Vec<PacketReport>,
-    reference_time: u24,
-) -> Result<()> {
-    let base_seq_num = packet_reports[0].seq_num();
-    buf.write_u16::<NetworkOrder>(base_seq_num)
-        .context("base seq num")?;
-    buf.write_u16::<NetworkOrder>(packet_reports.len() as u16)
-        .context("packet status count")?;
-    // TODO: use some relative/arbitrary start time instead? Or we could calculate ref time from
-    // the first delta time...
-    buf.write_u24::<NetworkOrder>(reference_time)
-        .context("reference time")?;
-
-    let (feedback_packet_count, chunks, deltas) = foo(&packet_reports);
-    buf.write_u8(feedback_packet_count)
-        .context("feedback packet count")?;
-
-    for chunk in chunks {
-        write_some_packet_status_chunk(chunk, buf).context("packet status chunk")?;
-    }
-
-    for delta in deltas {
-        write_some_recv_delta(buf, delta).context("delta")?;
-    }
-
-    Ok(())
 }
 
 #[derive(Debug, PartialEq)]
