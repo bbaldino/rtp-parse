@@ -1,10 +1,11 @@
-use std::fmt::{Debug, LowerHex};
+use std::fmt::Debug;
 
 use anyhow::{anyhow, Context, Result};
-use bit_cursor::{
-    bit_read::BitRead, bit_read_exts::BitReadExts, bit_write::BitWrite,
-    bit_write_exts::BitWriteExts, byte_order::NetworkOrder, nsw_types::*,
-};
+use parsely::*;
+// use bit_cursor::{
+//     bit_read::BitRead, bit_read_exts::BitReadExts, bit_write::BitWrite,
+//     bit_write_exts::BitWriteExts, byte_order::NetworkOrder, nsw_types::*,
+// };
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.1
 ///  0                   1                   2                   3
@@ -19,8 +20,9 @@ use bit_cursor::{
 ///   zero a valid length and avoids a possible infinite loop in
 ///   scanning a compound RTCP packet, while counting 32-bit words
 ///   avoids a validity check for a multiple of 4.)
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, ParselyRead, ParselyWrite)]
 pub struct RtcpHeader {
+    #[parsely(assertion = "|v: &u2| *v == 2")]
     pub version: u2,
     pub has_padding: bool,
     pub report_count: u5,
@@ -47,41 +49,17 @@ impl RtcpHeader {
     }
 }
 
-pub fn read_rtcp_header<R: BitRead + Debug + LowerHex>(buf: &mut R) -> Result<RtcpHeader> {
-    Ok(RtcpHeader {
-        version: buf.read_u2().context("version")?,
-        has_padding: buf.read_bool().context("has_padding")?,
-        report_count: buf.read_u5().context("report_count")?,
-        packet_type: buf.read_u8().context("packet_type")?,
-        length_field: buf.read_u16::<NetworkOrder>().context("length_field")?,
-    })
-}
-
-pub fn write_rtcp_header<W: BitWrite>(buf: &mut W, header: &RtcpHeader) -> Result<()> {
-    buf.write_u2(header.version).context("version")?;
-    buf.write_bool(header.has_padding).context("has_padding")?;
-    buf.write_u5(header.report_count).context("report_count")?;
-    buf.write_u8(header.packet_type).context("packet_type")?;
-    buf.write_u16::<NetworkOrder>(header.length_field)
-        .context("length_field")?;
-
-    Ok(())
-}
-
 #[cfg(test)]
 #[allow(clippy::unusual_byte_groupings, clippy::bool_assert_comparison)]
 mod tests {
-    use bit_cursor::bit_cursor::BitCursor;
-    use bitvec::{order::Msb0, vec::BitVec};
-
     use super::*;
 
     #[test]
     fn test_read_rtcp_header() {
         let data: Vec<u8> = vec![0b10_0_00001, 202, 0, 42];
-        let mut cursor = BitCursor::new(BitVec::<_, Msb0>::from_vec(data));
+        let mut cursor = BitCursor::from_vec(data);
 
-        let header = read_rtcp_header(&mut cursor)
+        let header = RtcpHeader::read::<NetworkOrder, _>(&mut cursor, ())
             .context("rtcp header")
             .unwrap();
         assert_eq!(header.version, u2::new(2));
@@ -94,7 +72,7 @@ mod tests {
     #[test]
     fn test_write_rtcp_header() {
         let header = RtcpHeader {
-            version: u2::new(1),
+            version: u2::new(2),
             has_padding: false,
             report_count: u5::new(1),
             packet_type: 1,
@@ -102,14 +80,15 @@ mod tests {
         };
 
         let data: Vec<u8> = vec![0; 4];
-        let bv = BitVec::<_, Msb0>::from_vec(data);
-        let mut cursor = BitCursor::new(bv);
+        let mut cursor = BitCursor::from_vec(data);
 
-        write_rtcp_header(&mut cursor, &header).expect("successful write");
+        header
+            .write::<NetworkOrder, _>(&mut cursor, ())
+            .expect("successful write");
         let data = cursor.into_inner();
 
         let mut read_cursor = BitCursor::new(data);
-        let read_header = read_rtcp_header(&mut read_cursor)
+        let read_header = RtcpHeader::read::<NetworkOrder, _>(&mut read_cursor, ())
             .context("rtcp header")
             .unwrap();
         assert_eq!(header, read_header);
