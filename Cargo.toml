@@ -16,3 +16,5 @@ repository = "https://github.com/bbaldino/rtp-parse.git"
 anyhow = "1"
 bytes = "1.6.0"
 parsely = { version = "0.1.0", path = "../parsely" }
+# TODO: we shouldn't depend on this directly here...should instead probably expose some aliases in bitcursor for the inner type it uses
+bitvec = "1.0.1"

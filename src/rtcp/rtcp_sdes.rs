@@ -1,13 +1,9 @@
 use std::str::from_utf8;
 
 use anyhow::{Context, Result};
-use bit_cursor::{
-    bit_read_exts::BitReadExts, bit_write_exts::BitWriteExts, byte_order::NetworkOrder,
-};
+use parsely::*;
 
-use crate::{util::consume_padding, PacketBuffer, PacketBufferMut};
-
-use super::rtcp_header::{write_rtcp_header, RtcpHeader};
+use super::rtcp_header::RtcpHeader;
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.5
 ///         0                   1                   2                   3
@@ -35,37 +31,17 @@ use super::rtcp_header::{write_rtcp_header, RtcpHeader};
 ///     boundary.  Note that this padding is separate from that indicated by
 ///     the P bit in the RTCP header.  A chunk with zero items (four null
 ///     octets) is valid but useless.
-#[derive(Debug)]
+#[derive(Debug, ParselyRead, ParselyWrite)]
+#[parsely_read(required_context("header: RtcpHeader"))]
 pub struct RtcpSdesPacket {
+    #[parsely_read(assign_from = "header")]
     pub header: RtcpHeader,
+    #[parsely_read(count = "header.report_count.into()")]
     pub chunks: Vec<SdesChunk>,
 }
 
 impl RtcpSdesPacket {
     pub const PT: u8 = 202;
-}
-
-pub fn read_rtcp_sdes<B: PacketBuffer>(buf: &mut B, header: RtcpHeader) -> Result<RtcpSdesPacket> {
-    let num_chunks = header.report_count;
-    let chunks = (0u8..num_chunks.into())
-        .map(|i| read_sdes_chunk(buf).with_context(|| format!("chunk {i}")))
-        .collect::<Result<Vec<SdesChunk>>>()
-        .context("sdes chunks")?;
-
-    Ok(RtcpSdesPacket { header, chunks })
-}
-
-pub fn write_rtcp_sdes<B: PacketBufferMut>(buf: &mut B, rtcp_sdes: &RtcpSdesPacket) -> Result<()> {
-    write_rtcp_header(buf, &rtcp_sdes.header).context("header")?;
-    rtcp_sdes
-        .chunks
-        .iter()
-        .enumerate()
-        .map(|(i, chunk)| write_sdes_chunk(buf, chunk).with_context(|| format!("chunk {i}")))
-        .collect::<Result<Vec<()>>>()
-        .context("chunks")?;
-
-    Ok(())
 }
 
 /// 0                   1                   2                   3
@@ -80,41 +56,49 @@ pub enum SdesItem {
     Unknown { item_type: u8, data: Vec<u8> },
 }
 
-pub fn read_sdes_item<R: PacketBuffer>(buf: &mut R) -> Result<SdesItem> {
-    let id = buf.read_u8().context("id")?;
-    if id == 0 {
-        return Ok(SdesItem::Empty);
-    }
-    let length = buf.read_u8().context("length")? as usize;
-    let mut value_bytes = vec![0u8; length];
-    buf.read_exact(&mut value_bytes).context("value")?;
-    match id {
-        1 => Ok(SdesItem::Cname(from_utf8(&value_bytes)?.to_owned())),
-        t => Ok(SdesItem::Unknown {
-            item_type: t,
-            data: value_bytes.to_vec(),
-        }),
+impl ParselyRead<()> for SdesItem {
+    fn read<T: parsely::ByteOrder, B: parsely::BitRead>(
+        buf: &mut B,
+        _ctx: (),
+    ) -> parsely::ParselyResult<Self> {
+        let id = buf.read_u8().context("id")?;
+
+        if id == 0 {
+            return Ok(SdesItem::Empty);
+        }
+        let length = buf.read_u8().context("length")? as usize;
+        let mut value_bytes = vec![0u8; length];
+        buf.read_exact(&mut value_bytes).context("value")?;
+        match id {
+            1 => Ok(SdesItem::Cname(from_utf8(&value_bytes)?.to_owned())),
+            t => Ok(SdesItem::Unknown {
+                item_type: t,
+                data: value_bytes.to_vec(),
+            }),
+        }
     }
 }
 
-pub fn write_sdes_item<W: PacketBufferMut>(buf: &mut W, sdes_item: &SdesItem) -> Result<()> {
-    match sdes_item {
-        SdesItem::Empty => {
-            buf.write_u8(0).context("id")?;
+impl ParselyWrite<()> for SdesItem {
+    fn write<T: ByteOrder, B: BitWrite>(&self, buf: &mut B, _ctx: ()) -> ParselyResult<()> {
+        match self {
+            SdesItem::Empty => {
+                buf.write_u8(0).context("id")?;
+            }
+            SdesItem::Cname(value) => {
+                buf.write_u8(1).context("id")?;
+                let bytes = value.as_bytes();
+                buf.write_u8(bytes.len() as u8).context("length")?;
+                buf.write(bytes).context("value")?;
+            }
+            SdesItem::Unknown { item_type, data } => {
+                buf.write_u8(*item_type).context("id")?;
+                buf.write(data).context("value")?;
+            }
         }
-        SdesItem::Cname(value) => {
-            buf.write_u8(1).context("id")?;
-            let bytes = value.as_bytes();
-            buf.write_u8(bytes.len() as u8).context("length")?;
-            buf.write(bytes).context("value")?;
-        }
-        SdesItem::Unknown { item_type, data } => {
-            buf.write_u8(*item_type).context("id")?;
-            buf.write(data).context("value")?;
-        }
-    }
 
-    Ok(())
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -123,52 +107,58 @@ pub struct SdesChunk {
     pub sdes_items: Vec<SdesItem>,
 }
 
-pub fn read_sdes_chunk<R: PacketBuffer>(buf: &mut R) -> Result<SdesChunk> {
-    let ssrc = buf.read_u32::<NetworkOrder>().context("ssrc")?;
-    let mut sdes_items: Vec<SdesItem> = Vec::new();
-    loop {
-        let sdes_item = read_sdes_item(buf).context("item")?;
-        if matches!(sdes_item, SdesItem::Empty) {
-            break;
+impl ParselyRead<()> for SdesChunk {
+    fn read<T: ByteOrder, B: BitRead>(buf: &mut B, _ctx: ()) -> ParselyResult<Self> {
+        let ssrc = buf.read_u32::<NetworkOrder>().context("ssrc")?;
+        let mut sdes_items: Vec<SdesItem> = Vec::new();
+        loop {
+            let sdes_item = SdesItem::read::<T, _>(buf, ()).context("item")?;
+            if matches!(sdes_item, SdesItem::Empty) {
+                break;
+            }
+            sdes_items.push(sdes_item);
         }
-        sdes_items.push(sdes_item);
+
+        // TODO: need to consume padding here, but B needs to be Seek.  Can the rtp lib use a new
+        // trait that's BitRead + Seek?  We'd need a way in Parsely to support adding extra
+        // constraints--is that possible?
+        // Or maybe we can get away with relying on the header's length field to know the end and
+        // don't need to explicitly consume the padding...but it's nice to be able to verify the
+        // slice was fully 'consumed' after reading to validate.
+        // consume_padding(buf);
+
+        Ok(SdesChunk { ssrc, sdes_items })
     }
-
-    consume_padding(buf);
-
-    Ok(SdesChunk { ssrc, sdes_items })
 }
 
-pub fn write_sdes_chunk<W: PacketBufferMut>(buf: &mut W, sdes_chunk: &SdesChunk) -> Result<()> {
-    buf.write_u32::<NetworkOrder>(sdes_chunk.ssrc)
-        .context("ssrc")?;
-    sdes_chunk
-        .sdes_items
-        .iter()
-        .enumerate()
-        .map(|(i, sdes_item)| {
-            write_sdes_item(buf, sdes_item).with_context(|| format!("sdes item {i}"))
-        })
-        .collect::<Result<Vec<()>>>()
-        .context("sdes items")?;
+impl ParselyWrite<()> for SdesChunk {
+    fn write<T: ByteOrder, B: BitWrite>(&self, buf: &mut B, _ctx: ()) -> ParselyResult<()> {
+        buf.write_u32::<NetworkOrder>(self.ssrc).context("ssrc")?;
+        self.sdes_items
+            .iter()
+            .enumerate()
+            .map(|(i, sdes_item)| {
+                sdes_item
+                    .write::<T, _>(buf, ())
+                    .with_context(|| format!("Sdes item {i}"))
+            })
+            .collect::<Result<Vec<()>>>()
+            .context("Sdes items")?;
 
-    write_sdes_item(buf, &SdesItem::Empty).context("empty item")?;
+        SdesItem::Empty
+            .write::<T, _>(buf, ())
+            .context("Terminating empty sdes item")?;
 
-    // TODO: I'm wondering about doing the padding here: what if the buffer we're given is a slice
-    // which doesn't have the proper context of the overall alignment? Also, we'll need some trait
-    // to be able to even add padding here to some alignment.
+        // TODO: I'm wondering about doing the padding here: what if the buffer we're given is a slice
+        // which doesn't have the proper context of the overall alignment? Also, we'll need some trait
+        // to be able to even add padding here to some alignment.
 
-    Ok(())
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use bit_cursor::{
-        bit_cursor::BitCursor,
-        nsw_types::{u2, u5},
-    };
-    use bitvec::{order::Msb0, vec::BitVec};
-
     use super::*;
 
     fn create_cname_item_bytes(str: &str) -> Vec<u8> {
@@ -184,8 +174,8 @@ mod tests {
         let str = "hello, world!";
         let item_data = create_cname_item_bytes(str);
 
-        let mut buf = BitCursor::new(BitVec::<u8, Msb0>::from_vec(item_data));
-        let sdes_item = read_sdes_item(&mut buf).unwrap();
+        let mut buf = BitCursor::from_vec(item_data);
+        let sdes_item = SdesItem::read::<NetworkOrder, _>(&mut buf, ()).expect("successful read");
         match sdes_item {
             SdesItem::Cname(v) => assert_eq!(v, str),
             _ => panic!("Wrong SdesItem type"),
@@ -198,8 +188,8 @@ mod tests {
         let mut item_data = vec![0x1, data.len() as u8];
         item_data.extend(data);
 
-        let mut buf = BitCursor::new(BitVec::<u8, Msb0>::from_vec(item_data));
-        let res = read_sdes_item(&mut buf);
+        let mut buf = BitCursor::from_vec(item_data);
+        let res = SdesItem::read::<NetworkOrder, _>(&mut buf, ());
         assert!(res.is_err());
     }
 
@@ -221,16 +211,19 @@ mod tests {
             // Empty sdes item to finish
             0x00,
         ];
-        let mut cursor = BitCursor::new(BitVec::<u8, Msb0>::from_vec(sdes_chunk));
+        let mut cursor = BitCursor::from_vec(sdes_chunk);
 
-        let sdes = read_rtcp_sdes(&mut cursor, header).expect("sdes");
+        let sdes = RtcpSdesPacket::read::<NetworkOrder, _>(&mut cursor, (header,))
+            .expect("Successful read");
         assert_eq!(sdes.chunks.len(), 1);
         let chunk = sdes.chunks.first().expect("sdes chunk");
         assert_eq!(chunk.ssrc, 2828806853);
     }
 
     // TODO:
+    // read: test that trailing padding is consumed
     // parse_sdes_chunk success | failure in chunk | failure in item
     // parse_sdes_chunks
     // parse_rtcp_sdes success | failure in chunk
+    // write: test that trailing padding is added
 }

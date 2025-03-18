@@ -2,10 +2,13 @@ use std::fmt::Debug;
 
 use anyhow::{anyhow, Context, Result};
 use parsely::*;
+
 // use bit_cursor::{
 //     bit_read::BitRead, bit_read_exts::BitReadExts, bit_write::BitWrite,
 //     bit_write_exts::BitWriteExts, byte_order::NetworkOrder, nsw_types::*,
 // };
+
+use crate::PacketBuffer;
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.1
 ///  0                   1                   2                   3
@@ -21,6 +24,7 @@ use parsely::*;
 ///   scanning a compound RTCP packet, while counting 32-bit words
 ///   avoids a validity check for a multiple of 4.)
 #[derive(Clone, Debug, PartialEq, Eq, ParselyRead, ParselyWrite)]
+#[parsely_read(buffer_type = "PacketBuffer")]
 #[parsely_write(sync_args("payload_length_bytes: u16", "num_ssrcs: usize"))]
 pub struct RtcpHeader {
     #[parsely(assertion = "|v: &u2| *v == 2")]
@@ -62,7 +66,7 @@ mod tests {
         let data: Vec<u8> = vec![0b10_0_00001, 202, 0, 42];
         let mut cursor = BitCursor::from_vec(data);
 
-        let header = RtcpHeader::read::<NetworkOrder, _>(&mut cursor, ())
+        let header = RtcpHeader::read::<NetworkOrder>(&mut cursor, ())
             .context("rtcp header")
             .unwrap();
         assert_eq!(header.version, u2::new(2));
@@ -86,12 +90,12 @@ mod tests {
         let mut cursor = BitCursor::from_vec(data);
 
         header
-            .write::<NetworkOrder, _>(&mut cursor, ())
+            .write::<NetworkOrder>(&mut cursor, ())
             .expect("successful write");
         let data = cursor.into_inner();
 
         let mut read_cursor = BitCursor::new(data);
-        let read_header = RtcpHeader::read::<NetworkOrder, _>(&mut read_cursor, ())
+        let read_header = RtcpHeader::read::<NetworkOrder>(&mut read_cursor, ())
             .context("rtcp header")
             .unwrap();
         assert_eq!(header, read_header);

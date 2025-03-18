@@ -1,45 +1,44 @@
 use std::fmt::LowerHex;
 
 use anyhow::{anyhow, bail, Context, Result};
+use parsely::*;
 
-use crate::{
-    rtcp::{
-        rtcp_bye::read_rtcp_bye,
-        rtcp_fb_nack::read_rtcp_fb_nack,
-        rtcp_fb_tcc::{read_rtcp_fb_tcc, RtcpFbTccPacket},
-        rtcp_header::read_rtcp_header,
-    },
-    PacketBuffer,
-};
-
-use super::{
-    rtcp_bye::RtcpByePacket,
-    rtcp_fb_fir::{read_rtcp_fb_fir, RtcpFbFirPacket},
-    rtcp_fb_header::read_rtcp_fb_header,
-    rtcp_fb_nack::RtcpFbNackPacket,
-    rtcp_fb_packet::{RtcpFbPsPacket, RtcpFbTlPacket},
-    rtcp_fb_pli::{read_rtcp_fb_pli, RtcpFbPliPacket},
-    rtcp_header::RtcpHeader,
-    rtcp_rr::{read_rtcp_rr, RtcpRrPacket},
-    rtcp_sdes::{read_rtcp_sdes, RtcpSdesPacket},
-    rtcp_sr::{read_rtcp_sr, RtcpSrPacket},
-};
+use super::rtcp_header::RtcpHeader;
 
 #[derive(Debug)]
 pub enum SomeRtcpPacket {
     CompoundRtcpPacket(Vec<SomeRtcpPacket>),
     RtcpByePacket(RtcpByePacket),
-    RtcpSrPacket(RtcpSrPacket),
-    RtcpRrPacket(RtcpRrPacket),
+    // RtcpSrPacket(RtcpSrPacket),
+    // RtcpRrPacket(RtcpRrPacket),
     RtcpSdesPacket(RtcpSdesPacket),
-    RtcpFbNackPacket(RtcpFbNackPacket),
-    RtcpFbFirPacket(RtcpFbFirPacket),
-    RtcpFbTccPacket(RtcpFbTccPacket),
-    RtcpFbPliPacket(RtcpFbPliPacket),
+    // RtcpFbNackPacket(RtcpFbNackPacket),
+    // RtcpFbFirPacket(RtcpFbFirPacket),
+    // RtcpFbTccPacket(RtcpFbTccPacket),
+    // RtcpFbPliPacket(RtcpFbPliPacket),
     UnknownRtcpPacket {
         header: RtcpHeader,
         payload: Vec<u8>,
     },
+}
+
+impl ParselyRead<()> for SomeRtcpPacket {
+    fn read<T: parsely::ByteOrder, B: parsely::BitRead>(
+        buf: &mut B,
+        ctx: (),
+    ) -> parsely::ParselyResult<Self> {
+        todo!()
+    }
+}
+
+pub fn parse_single_rtcp_packet<T: ByteOrder, B: BitRead>(
+    buf: &mut B,
+) -> ParselyResult<SomeRtcpPacket> {
+    let header = RtcpHeader::read::<T, B>(buf).context("header")?;
+    let payload_length = header
+        .payload_length_bytes()
+        .context("header length field")?;
+    let mut payload_buffer = buf.sub_cur
 }
 
 pub fn parse_rtcp_packet<B: PacketBuffer + LowerHex>(buf: &mut B) -> Result<SomeRtcpPacket> {
@@ -59,6 +58,10 @@ pub fn parse_rtcp_packet<B: PacketBuffer + LowerHex>(buf: &mut B) -> Result<Some
         1 => Ok(packets.remove(0)),
         _ => Ok(SomeRtcpPacket::CompoundRtcpPacket(packets)),
     }
+}
+
+pub fn read_single_rtcp_packet<T: ByteOrder, B: BitRead>(buf: &mut B) -> Result<SomeRtcpPacket> {
+    let header = RtcpHeader::read::<T, B>(buf, ()).context("Rtcp header");
 }
 
 pub fn parse_single_rtcp_packet<B: PacketBuffer>(buf: &mut B) -> Result<SomeRtcpPacket> {
