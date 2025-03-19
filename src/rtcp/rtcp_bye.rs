@@ -256,4 +256,23 @@ mod tests {
 
         assert_eq!(rtcp_bye, read_rtcp_bye);
     }
+
+    #[test]
+    fn test_write_success_with_padding() {
+        let mut rtcp_bye = RtcpByePacket {
+            header: TEST_RTCP_HEADER,
+            ssrcs: vec![42],
+            reason: Some(RtcpByeReason::new("G")),
+        };
+        rtcp_bye.sync(()).unwrap();
+        let buf = vec![0; 32];
+        let mut cursor = BitCursor::from_vec(buf);
+
+        rtcp_bye
+            .write::<NetworkOrder>(&mut cursor, ())
+            .expect("successful write");
+
+        // Make sure we landed on a word boundary
+        assert!(cursor.position() % 32 == 0);
+    }
 }

@@ -92,7 +92,7 @@ where
     T: PacketBuffer + BitWrite,
 {
     fn add_padding(&mut self) {
-        while self.position() % 4 != 0 && self.bytes_remaining() > 0 {
+        while self.position() % 32 != 0 && self.bytes_remaining() > 0 {
             self.write_u8(0).expect("Write should succeed");
         }
     }
