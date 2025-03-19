@@ -3,13 +3,6 @@ use std::fmt::Debug;
 use anyhow::{anyhow, Context, Result};
 use parsely::*;
 
-// use bit_cursor::{
-//     bit_read::BitRead, bit_read_exts::BitReadExts, bit_write::BitWrite,
-//     bit_write_exts::BitWriteExts, byte_order::NetworkOrder, nsw_types::*,
-// };
-
-use crate::PacketBuffer;
-
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.1
 ///  0                   1                   2                   3
 ///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -24,7 +17,6 @@ use crate::PacketBuffer;
 ///   scanning a compound RTCP packet, while counting 32-bit words
 ///   avoids a validity check for a multiple of 4.)
 #[derive(Clone, Debug, PartialEq, Eq, ParselyRead, ParselyWrite)]
-#[parsely_read(buffer_type = "PacketBuffer")]
 #[parsely_write(sync_args("payload_length_bytes: u16", "num_ssrcs: usize"))]
 pub struct RtcpHeader {
     #[parsely(assertion = "|v: &u2| *v == 2")]
