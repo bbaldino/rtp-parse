@@ -65,16 +65,19 @@ impl<B: PacketBufferMut> ParselyWrite<B, ()> for RtcpByeReason {
 /// (opt) |     length    |               reason for leaving            ...
 ///       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 #[derive(Debug, PartialEq, ParselyRead, ParselyWrite)]
-#[parsely_read(buffer_type = "PacketBuffer")]
+#[parsely_read(
+    buffer_type = "PacketBuffer",
+    required_context("rtcp_header: RtcpHeader")
+)]
 #[parsely_write(buffer_type = "PacketBufferMut")]
-#[parsely_read(required_context("rtcp_header: RtcpHeader"))]
 pub struct RtcpByePacket {
     #[parsely_read(assign_from = "rtcp_header")]
     #[parsely_write(sync_with("self.payload_length_bytes()", "self.ssrcs.len()"))]
     pub header: RtcpHeader,
     #[parsely_read(count = "header.report_count.into()")]
     pub ssrcs: Vec<u32>,
-    #[parsely_read(when = "buf.bytes_remaining() > 0")]
+    #[parsely_read(when = "buf.bytes_remaining() > 0", after = "buf.consume_padding()")]
+    #[parsely_write(after = "buf.add_padding()")]
     pub reason: Option<RtcpByeReason>,
 }
 
@@ -84,8 +87,13 @@ impl RtcpByePacket {
     pub fn payload_length_bytes(&self) -> u16 {
         // The payload's length in bytes is the number of ssrcs * 4 plus the reason length and the
         // leading byte to describe its length (if there is a reason)
-        // TODO: this needs to take padding into account
-        (self.ssrcs.len() * 4 + self.reason.as_ref().map_or(0, |r| r.length_bytes() + 1)) as u16
+        let mut payload_length_bytes =
+            self.ssrcs.len() * 4 + self.reason.as_ref().map_or(0, |r| r.length_bytes() + 1);
+
+        while payload_length_bytes % 4 != 0 {
+            payload_length_bytes += 1
+        }
+        payload_length_bytes as u16
     }
 }
 
@@ -161,6 +169,30 @@ mod tests {
         let mut buf = BitCursor::from_vec(payload);
         let result = RtcpByePacket::read::<NetworkOrder>(&mut buf, (TEST_RTCP_HEADER,));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_consume_padding() {
+        let reason_str = "g";
+        let reason_bytes = reason_str.bytes();
+        #[rustfmt::skip]
+        let mut payload = vec![
+            // ssrc 1
+            0x00, 0x00, 0x00, 0x01, 
+            // ssrc 2
+            0x00, 0x00, 0x00, 0x02,
+            // reason length
+            reason_bytes.len() as u8
+        ];
+        // add reason bytes
+        payload.extend(reason_bytes.collect::<Vec<u8>>());
+        // 2 bytes of padding
+        payload.extend([0x00, 0x00]);
+        let mut buf = BitCursor::from_vec(payload);
+        let _rtcp_bye = RtcpByePacket::read::<NetworkOrder>(&mut buf, (TEST_RTCP_HEADER,))
+            .expect("Successful read");
+        // Make sure the buffer was fully consumed
+        assert_eq!(buf.bytes_remaining(), 0);
     }
 
     #[test]
