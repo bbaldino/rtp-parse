@@ -220,6 +220,19 @@ mod tests {
     }
 
     #[test]
+    fn test_sync() {
+        let mut rtcp_bye = RtcpByePacket::default().add_ssrc(42);
+        rtcp_bye.sync(()).unwrap();
+        assert_eq!(rtcp_bye.header.packet_type, RtcpByePacket::PT);
+        assert_eq!(rtcp_bye.header.report_count, 1);
+        assert_eq!(rtcp_bye.header.length_field, 1);
+
+        let mut rtcp_bye = rtcp_bye.with_reason("goodbye");
+        rtcp_bye.sync(()).unwrap();
+        assert_eq!(rtcp_bye.header.length_field, 3);
+    }
+
+    #[test]
     fn test_write_success() {
         let mut rtcp_bye = RtcpByePacket {
             header: TEST_RTCP_HEADER,
