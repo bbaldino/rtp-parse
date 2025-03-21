@@ -81,6 +81,20 @@ pub struct RtcpByePacket {
     pub reason: Option<RtcpByeReason>,
 }
 
+impl Default for RtcpByePacket {
+    fn default() -> Self {
+        let header = RtcpHeader {
+            packet_type: RtcpByePacket::PT,
+            ..Default::default()
+        };
+        Self {
+            header,
+            ssrcs: Default::default(),
+            reason: Default::default(),
+        }
+    }
+}
+
 impl RtcpByePacket {
     pub const PT: u8 = 203;
 
@@ -94,6 +108,16 @@ impl RtcpByePacket {
             payload_length_bytes += 1
         }
         payload_length_bytes as u16
+    }
+
+    pub fn add_ssrc(mut self, ssrc: u32) -> Self {
+        self.ssrcs.push(ssrc);
+        self
+    }
+
+    pub fn with_reason(mut self, reason: &str) -> Self {
+        self.reason = Some(RtcpByeReason::new(reason));
+        self
     }
 }
 
