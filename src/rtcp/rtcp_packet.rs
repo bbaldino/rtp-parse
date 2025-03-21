@@ -5,7 +5,7 @@ use parsely::*;
 
 use crate::{rtcp::rtcp_bye::RtcpByePacket, PacketBuffer};
 
-use super::rtcp_header::RtcpHeader;
+use super::{rtcp_header::RtcpHeader, rtcp_sdes::RtcpSdesPacket};
 
 #[derive(Debug)]
 pub enum SomeRtcpPacket {
@@ -13,7 +13,7 @@ pub enum SomeRtcpPacket {
     RtcpByePacket(RtcpByePacket),
     // RtcpSrPacket(RtcpSrPacket),
     // RtcpRrPacket(RtcpRrPacket),
-    // RtcpSdesPacket(RtcpSdesPacket),
+    RtcpSdesPacket(RtcpSdesPacket),
     // RtcpFbNackPacket(RtcpFbNackPacket),
     // RtcpFbFirPacket(RtcpFbFirPacket),
     // RtcpFbTccPacket(RtcpFbTccPacket),
