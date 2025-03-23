@@ -17,12 +17,12 @@ use parsely::*;
 ///   scanning a compound RTCP packet, while counting 32-bit words
 ///   avoids a validity check for a multiple of 4.)
 #[derive(Clone, Debug, PartialEq, Eq, ParselyRead, ParselyWrite)]
-#[parsely_write(sync_args("payload_length_bytes: u16", "num_ssrcs: usize"))]
+#[parsely_write(sync_args("payload_length_bytes: u16", "report_count_value: u5"))]
 pub struct RtcpHeader {
     #[parsely(assertion = "|v: &u2| *v == 2")]
     pub version: u2,
     pub has_padding: bool,
-    #[parsely_write(sync_func = "ParselyResult::Ok(u5::new(num_ssrcs as u8))")]
+    #[parsely_write(sync_func = "ParselyResult::Ok(report_count_value)")]
     pub report_count: u5,
     pub packet_type: u8,
     #[parsely_write(sync_func = "ParselyResult::Ok(payload_length_bytes / 4)")]
@@ -57,6 +57,16 @@ impl RtcpHeader {
         self.length_field
             .checked_mul(4)
             .ok_or(anyhow!("Invalid length field"))
+    }
+
+    pub fn report_count(mut self, report_count: u5) -> Self {
+        self.report_count = report_count;
+        self
+    }
+
+    pub fn packet_type(mut self, packet_type: u8) -> Self {
+        self.packet_type = packet_type;
+        self
     }
 }
 

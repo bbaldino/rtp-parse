@@ -38,7 +38,7 @@ use super::rtcp_header::RtcpHeader;
 #[parsely_write(buffer_type = "PacketBufferMut")]
 pub struct RtcpSdesPacket {
     #[parsely_read(assign_from = "header")]
-    #[parsely_write(sync_with("self.payload_length_bytes()", "self.chunks.len()"))]
+    #[parsely_write(sync_with("self.payload_length_bytes()", "u5::new(self.chunks.len() as u8)"))]
     #[parsely(assertion = "|header: &RtcpHeader| header.packet_type == RtcpSdesPacket::PT")]
     pub header: RtcpHeader,
     #[parsely_read(count = "header.report_count.into()")]
@@ -70,8 +70,9 @@ impl RtcpSdesPacket {
     }
 }
 
-/// 0                   1                   2                   3
-/// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+/// https://datatracker.ietf.org/doc/html/rfc3550#section-6.5
+///  0                   1                   2                   3
+///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// |      ID       |     length    | value                       ...
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -143,6 +144,9 @@ impl<B: PacketBufferMut> ParselyWrite<B, ()> for SdesItem {
     }
 }
 
+/// https://datatracker.ietf.org/doc/html/rfc3550#section-6.5
+///         0                   1                   2                   3
+///         0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 ///        +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
 /// chunk  |                          SSRC/CSRC                            |
 ///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -509,7 +513,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_sdes() {
+    fn test_write_rtcp_sdes() {
         let mut rtcp_sdes = RtcpSdesPacket::default()
             .add_chunk(SdesChunk::new(42).add_item(SdesItem::cname("hello")))
             .add_chunk(SdesChunk::new(43).add_item(SdesItem::cname("world")));

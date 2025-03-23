@@ -72,7 +72,7 @@ impl<B: PacketBufferMut> ParselyWrite<B, ()> for RtcpByeReason {
 #[parsely_write(buffer_type = "PacketBufferMut")]
 pub struct RtcpByePacket {
     #[parsely_read(assign_from = "rtcp_header")]
-    #[parsely_write(sync_with("self.payload_length_bytes()", "self.ssrcs.len()"))]
+    #[parsely_write(sync_with("self.payload_length_bytes()", "u5::new(self.ssrcs.len() as u8)"))]
     pub header: RtcpHeader,
     #[parsely_read(count = "header.report_count.into()")]
     pub ssrcs: Vec<u32>,

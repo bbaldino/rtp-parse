@@ -6,7 +6,7 @@ use parsely::*;
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// |                  SSRC of media source                         |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[derive(Debug, ParselyRead, ParselyWrite, PartialEq)]
+#[derive(Debug, Default, ParselyRead, ParselyWrite, PartialEq)]
 pub struct RtcpFbHeader {
     pub sender_ssrc: u32,
     pub media_source_ssrc: u32,
@@ -18,5 +18,15 @@ impl RtcpFbHeader {
             sender_ssrc,
             media_source_ssrc,
         }
+    }
+
+    pub fn sender_ssrc(mut self, sender_ssrc: u32) -> Self {
+        self.sender_ssrc = sender_ssrc;
+        self
+    }
+
+    pub fn media_source_ssrc(mut self, media_source_ssrc: u32) -> Self {
+        self.media_source_ssrc = media_source_ssrc;
+        self
     }
 }
