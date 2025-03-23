@@ -5,7 +5,13 @@ use parsely::*;
 
 use crate::{rtcp::rtcp_bye::RtcpByePacket, PacketBuffer};
 
-use super::{rtcp_header::RtcpHeader, rtcp_sdes::RtcpSdesPacket};
+use super::{
+    rtcp_fb_fir::RtcpFbFirPacket,
+    rtcp_fb_header::RtcpFbHeader,
+    rtcp_fb_packet::{RtcpFbPsPacket, RtcpFbTlPacket},
+    rtcp_header::RtcpHeader,
+    rtcp_sdes::RtcpSdesPacket,
+};
 
 #[derive(Debug)]
 pub enum SomeRtcpPacket {
@@ -15,7 +21,7 @@ pub enum SomeRtcpPacket {
     // RtcpRrPacket(RtcpRrPacket),
     RtcpSdesPacket(RtcpSdesPacket),
     // RtcpFbNackPacket(RtcpFbNackPacket),
-    // RtcpFbFirPacket(RtcpFbFirPacket),
+    RtcpFbFirPacket(RtcpFbFirPacket),
     // RtcpFbTccPacket(RtcpFbTccPacket),
     // RtcpFbPliPacket(RtcpFbPliPacket),
     UnknownRtcpPacket {
@@ -61,6 +67,20 @@ pub fn read_single_rtcp_packet<T: ByteOrder, B: PacketBuffer>(
         RtcpByePacket::PT => Ok(SomeRtcpPacket::RtcpByePacket(
             RtcpByePacket::read::<T>(&mut payload_buffer, (header,)).context("rtcp bye")?,
         )),
+        RtcpSdesPacket::PT => Ok(SomeRtcpPacket::RtcpSdesPacket(
+            RtcpSdesPacket::read::<T>(&mut payload_buffer, (header,)).context("rtcp sdes")?,
+        )),
+        RtcpFbPsPacket::PT | RtcpFbTlPacket::PT => {
+            let fb_header =
+                RtcpFbHeader::read::<T>(&mut payload_buffer, ()).context("rtcp fb header")?;
+            match (header.packet_type, header.report_count) {
+                (RtcpFbPsPacket::PT, RtcpFbFirPacket::FMT) => Ok(SomeRtcpPacket::RtcpFbFirPacket(
+                    RtcpFbFirPacket::read::<T>(&mut payload_buffer, (header, fb_header))
+                        .context("rtcp fb fir")?,
+                )),
+                (pt, fmt) => bail!("Unsuppsorted RTCP FB packet, pt {pt} fmt {fmt}"),
+            }
+        }
         pt => bail!("Unsupported packet type {pt}"),
     };
     if payload_buffer.bytes_remaining() > 0 {
