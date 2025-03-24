@@ -8,6 +8,7 @@ use crate::{rtcp::rtcp_bye::RtcpByePacket, PacketBuffer};
 use super::{
     rtcp_fb_fir::RtcpFbFirPacket,
     rtcp_fb_header::RtcpFbHeader,
+    rtcp_fb_nack::RtcpFbNackPacket,
     rtcp_fb_packet::{RtcpFbPsPacket, RtcpFbTlPacket},
     rtcp_header::RtcpHeader,
     rtcp_sdes::RtcpSdesPacket,
@@ -20,7 +21,7 @@ pub enum SomeRtcpPacket {
     // RtcpSrPacket(RtcpSrPacket),
     // RtcpRrPacket(RtcpRrPacket),
     RtcpSdesPacket(RtcpSdesPacket),
-    // RtcpFbNackPacket(RtcpFbNackPacket),
+    RtcpFbNackPacket(RtcpFbNackPacket),
     RtcpFbFirPacket(RtcpFbFirPacket),
     // RtcpFbTccPacket(RtcpFbTccPacket),
     // RtcpFbPliPacket(RtcpFbPliPacket),
@@ -78,6 +79,12 @@ pub fn read_single_rtcp_packet<T: ByteOrder, B: PacketBuffer>(
                     RtcpFbFirPacket::read::<T>(&mut payload_buffer, (header, fb_header))
                         .context("rtcp fb fir")?,
                 )),
+                (RtcpFbTlPacket::PT, RtcpFbNackPacket::FMT) => {
+                    Ok(SomeRtcpPacket::RtcpFbNackPacket(
+                        RtcpFbNackPacket::read::<T>(&mut payload_buffer, (header, fb_header))
+                            .context("rtcp fb nack")?,
+                    ))
+                }
                 (pt, fmt) => bail!("Unsuppsorted RTCP FB packet, pt {pt} fmt {fmt}"),
             }
         }

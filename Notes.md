@@ -48,3 +48,17 @@ impl Default for MyRtcpPacket {
 
 so at this point I think I'm going to go back to Default impls and manual APIs
 and get rid of typed-builder
+
+### Sync arguments
+
+Going back and forth a bit on what should be treated as a "sync argument" (passed to the sync method) and what shouldn't.  I think my first thought was:
+
+- "dynamic" values which are based on the payload should/need to be passed to sync (payload length, report count)
+- "static" values can just be set upon creation (i.e. in Default impl)
+
+There are a couple weird examples of this: FB packets use the report count
+field to denote the FMT so in those cases the field is "static" and would be
+set in the Default impl but then would also need to be passed to sync, which is
+a bit annoying but not a huge deal.  But that made me wonder if packet type
+should also be passed to sync?  I think as long as nothing uses that
+"dynamically" we can leave it out.

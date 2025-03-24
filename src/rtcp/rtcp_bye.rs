@@ -72,6 +72,8 @@ impl<B: PacketBufferMut> ParselyWrite<B, ()> for RtcpByeReason {
 #[parsely_write(buffer_type = "PacketBufferMut")]
 pub struct RtcpByePacket {
     #[parsely_read(assign_from = "rtcp_header")]
+    // TODO: should we do a falliable conversion here when passing self.ssrcs.len()? Do we need to
+    // support sync_with expressions being falliable?
     #[parsely_write(sync_with("self.payload_length_bytes()", "u5::new(self.ssrcs.len() as u8)"))]
     pub header: RtcpHeader,
     #[parsely_read(count = "header.report_count.into()")]
