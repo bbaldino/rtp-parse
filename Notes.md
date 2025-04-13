@@ -53,7 +53,8 @@ and get rid of typed-builder
 
 Going back and forth a bit on what should be treated as a "sync argument" (passed to the sync method) and what shouldn't.  I think my first thought was:
 
-- "dynamic" values which are based on the payload should/need to be passed to sync (payload length, report count)
+- "dynamic" values which are based on the payload should/need to be passed to
+sync (payload length, report count)
 - "static" values can just be set upon creation (i.e. in Default impl)
 
 There are a couple weird examples of this: FB packets use the report count
@@ -62,3 +63,16 @@ set in the Default impl but then would also need to be passed to sync, which is
 a bit annoying but not a huge deal.  But that made me wonder if packet type
 should also be passed to sync?  I think as long as nothing uses that
 "dynamically" we can leave it out.
+
+### RTP packets
+
+Two approaches I'm considering when dealing with RTP packets:
+
+- Parse things completely (i.e. read/copy header fields into a header struct)
+- Keep a contiguous buffer (perhaps split views via Bytes) and for things like
+the header use a "lens" approach (where reads/writes index into the buffer
+directly)
+
+The first approach simplifies things quite a bit, I think, but the performance
+implications are unclear.  So I think some amount of investigation into both
+styles and some comparisons are needed.

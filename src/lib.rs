@@ -1,5 +1,6 @@
 // use bit_cursor::{bit_cursor::BitCursor, bit_read::BitRead, bit_write::BitWrite};
 use bitvec::{order::Msb0, slice::BitSlice, vec::BitVec};
+use bytes::Bytes;
 
 use std::{
     fmt::{Debug, LowerHex},
@@ -12,6 +13,8 @@ use parsely::*;
 pub mod rtcp;
 // pub mod rtp;
 pub mod util;
+
+impl BitCursor<Bytes> {}
 
 pub trait PacketBuffer: BitRead + Seek + Debug + LowerHex {
     /// Return the current cursor position of this buffer
@@ -42,7 +45,8 @@ impl PacketBuffer for BitCursor<BitVec<u8, Msb0>> {
     }
 
     fn sub_buffer(&self, range: Range<usize>) -> impl PacketBuffer {
-        self.sub_cursor(range)
+        self.sub_cursor_new(range)
+        // self.sub_cursor(range)
     }
 
     fn consume_padding(&mut self) {
@@ -69,13 +73,11 @@ impl PacketBuffer for BitCursor<&BitSlice<u8, Msb0>> {
     }
 
     fn sub_buffer(&self, range: Range<usize>) -> impl PacketBuffer {
-        self.sub_cursor(range)
+        self.sub_cursor_new(range)
     }
 
     fn consume_padding(&mut self) {
-        while self.position() % 32 != 0 && self.bytes_remaining() > 0 {
-            let byte = self.read_u8().expect("Read should succeed");
-            if byte != 0x00 {
+        while self.position() % 32 != 0 && self.bytes_remaining() > 0 ]>).           if byte != 0x00 {
                 self.seek(std::io::SeekFrom::Current(-1))
                     .expect("Seek backwards should succeed");
                 return;

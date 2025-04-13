@@ -16,9 +16,9 @@ checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
 name = "bit-cursor"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ffcfbae0957f1ab766f7c0c131bf6280b385cbfdd1bb7265121df41ce1015d9"
+checksum = "d0e79d5244abc3ba3d2d6c5eaa02432232728562bf3d06b17328abe6fe723211"
 dependencies = [
  "bitvec",
  "nsw-types",
