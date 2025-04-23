@@ -1,9 +1,7 @@
-use std::io::SeekFrom;
-
 use anyhow::{anyhow, bail, Context};
-use parsely::*;
+use parsely_rs::*;
 
-use crate::{rtcp::rtcp_bye::RtcpByePacket, PacketBuffer};
+use crate::rtcp::rtcp_bye::RtcpByePacket;
 
 use super::{
     rtcp_fb_fir::RtcpFbFirPacket,
@@ -31,13 +29,12 @@ pub enum SomeRtcpPacket {
     },
 }
 
-impl<B: PacketBuffer> ParselyRead<B, ()> for SomeRtcpPacket {
+impl<B: BitBuf> ParselyRead<B, ()> for SomeRtcpPacket {
     fn read<T: ByteOrder>(buf: &mut B, _ctx: ()) -> ParselyResult<Self> {
         let mut packets: Vec<SomeRtcpPacket> = Vec::new();
 
         let mut sub_packet_num = 1;
-        // println!("parsing packet, buf: {buf:x}");
-        while buf.bytes_remaining() >= RtcpHeader::SIZE_BYTES {
+        while buf.remaining_bytes() >= RtcpHeader::SIZE_BYTES {
             let packet = read_single_rtcp_packet::<T, B>(buf)
                 .with_context(|| format!("sub packet {sub_packet_num}"))?;
             packets.push(packet);
@@ -52,18 +49,18 @@ impl<B: PacketBuffer> ParselyRead<B, ()> for SomeRtcpPacket {
     }
 }
 
-pub fn read_single_rtcp_packet<T: ByteOrder, B: PacketBuffer>(
+pub fn read_single_rtcp_packet<T: ByteOrder, B: BitBuf>(
     buf: &mut B,
 ) -> ParselyResult<SomeRtcpPacket> {
     let header = RtcpHeader::read::<T>(buf, ()).context("header")?;
     let payload_length = header
         .payload_length_bytes()
         .context("header length field")? as usize;
-    if payload_length > buf.bytes_remaining() {
-        bail!("Invalid RTCP packet, length {payload_length} bytes but buf has only {} bytes remaining", buf.bytes_remaining());
+    if payload_length > buf.remaining_bytes() {
+        bail!("Invalid RTCP packet, length {payload_length} bytes but buf has only {} bytes remaining", buf.remaining_bytes());
     }
-    let payload_length_bits = payload_length * 8;
-    let mut payload_buffer = buf.sub_buffer(0..payload_length_bits);
+
+    let mut payload_buffer = buf.take_bytes(payload_length);
     let result: ParselyResult<SomeRtcpPacket> = match header.packet_type {
         RtcpByePacket::PT => Ok(SomeRtcpPacket::RtcpByePacket(
             RtcpByePacket::read::<T>(&mut payload_buffer, (header,)).context("rtcp bye")?,
@@ -90,26 +87,24 @@ pub fn read_single_rtcp_packet<T: ByteOrder, B: PacketBuffer>(
         }
         pt => bail!("Unsupported packet type {pt}"),
     };
-    if payload_buffer.bytes_remaining() > 0 {
+    if payload_buffer.remaining_bytes() > 0 {
         // TODO: ideally we'd get more context as to which type went wrong here
         bail!("Did not consume entire buffer when reading rtcp packet");
     }
-    drop(payload_buffer);
-    if result.is_ok() {
-        buf.seek(SeekFrom::Current(payload_length_bits as i64))
-            .context("Seeking past read data")?;
-    }
+    // if result.is_ok() {
+    //     buf.advance(payload_length);
+    // }
     result
 }
 
-// pub fn parse_single_rtcp_packet<B: PacketBuffer>(buf: &mut B) -> Result<SomeRtcpPacket> {
+// pub fn parse_single_rtcp_packet<B: BitBuf>(buf: &mut B) -> Result<SomeRtcpPacket> {
 //     // println!("Parsing single rtcp packet: {buf:x}");
 //     let header = read_rtcp_header(buf).context("rtcp header")?;
 //     let payload_length = header
 //         .payload_length_bytes()
 //         .context("header length field")? as usize;
-//     if payload_length > buf.bytes_remaining() {
-//         bail!("Invalid RTCP packet, length {payload_length} bytes but buf has only {} bytes remaining", buf.bytes_remaining());
+//     if payload_length > buf.remaining_bytes() {
+//         bail!("Invalid RTCP packet, length {payload_length} bytes but buf has only {} bytes remaining", buf.remaining_bytes());
 //     }
 //     let payload_length_bits = payload_length * 8;
 //     let mut payload_buffer = buf.sub_buffer(0..(payload_length * 8));
@@ -162,8 +157,6 @@ pub fn read_single_rtcp_packet<T: ByteOrder, B: PacketBuffer>(
 
 #[cfg(test)]
 mod tests {
-    use std::io::Seek;
-
     use super::*;
 
     #[test]
@@ -175,15 +168,16 @@ mod tests {
         rtcp_bye.sync(()).expect("sync");
 
         let packet_size = RtcpHeader::SIZE_BYTES + rtcp_bye.payload_length_bytes() as usize;
-        let data = vec![0; packet_size];
-        let mut cursor = BitCursor::from_vec(data);
+        let mut buf_mut = BitsMut::new();
         rtcp_bye
-            .write::<NetworkOrder>(&mut cursor, ())
+            .write::<NetworkOrder>(&mut buf_mut, ())
             .expect("successful write");
-        cursor.rewind().expect("rewind");
 
-        let result =
-            SomeRtcpPacket::read::<NetworkOrder>(&mut cursor, ()).expect("successful read");
+        assert_eq!(packet_size, buf_mut.len_bytes());
+
+        let mut buf = buf_mut.freeze();
+
+        let result = SomeRtcpPacket::read::<NetworkOrder>(&mut buf, ()).expect("successful read");
         dbg!(result);
     }
 }

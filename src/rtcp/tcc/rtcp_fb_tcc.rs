@@ -8,7 +8,7 @@ use crate::{
     rtcp::{
         rtcp_fb_header::RtcpFbHeader, rtcp_fb_tcc::SomePacketStatusChunk, rtcp_header::RtcpHeader,
     },
-    PacketBuffer, PacketBufferMut,
+    BitBuf, BitBufMut,
 };
 
 /// https://datatracker.ietf.org/doc/html/draft-holmer-rmcat-transport-wide-cc-extensions-01#section-3.1
@@ -59,7 +59,7 @@ impl RtcpFbTccPacket2 {
     pub const FMT: u5 = u5::new(15);
 }
 
-pub fn read_rtcp_fb_tcc2<B: PacketBuffer>(
+pub fn read_rtcp_fb_tcc2<B: BitBuf>(
     buf: &mut B,
     header: RtcpHeader,
     fb_header: RtcpFbHeader,
@@ -90,7 +90,7 @@ enum SomeRecvDelta {
     LargeOrNegative(i16),
 }
 
-fn write_some_recv_delta<B: PacketBufferMut>(buf: &mut B, delta: SomeRecvDelta) -> Result<()> {
+fn write_some_recv_delta<B: BitBufMut>(buf: &mut B, delta: SomeRecvDelta) -> Result<()> {
     match delta {
         SomeRecvDelta::Small(d) => {
             let write_u8 = buf.write_u8(d);

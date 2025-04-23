@@ -76,3 +76,25 @@ directly)
 The first approach simplifies things quite a bit, I think, but the performance
 implications are unclear.  So I think some amount of investigation into both
 styles and some comparisons are needed.
+
+### Sub-buffers
+
+One goal I was really interested in was the concept of a "sub-buffer" where an exact-sized-slice of some kind could be taken and passed to a parsing method.  This could help ensure both that the parsing method didn't read too much data and also that it did consume all the data it was supposed to.  Unfortunately this concept doesn't work
+NOTE: The "Take" approach might work here if it's "taking" the reference and it's still available.  webrtc-rs seems to use it this way, need to verify
+
+### Padding
+
+webrtc-rs deals with padding by assuming the start of the buffer some parsing
+code is given is aligned and then tracking how much data has been read so it
+can then calculate specifically how many bytes need to be consumed.  need to
+check if we can do something like that at the parsely layer.
+
+I think what we can do:
+
+When reading, we can save the number of remaining bytes at the start and then
+subtract the number of remaining bytes at the end to know how many bytes we
+consumed.  we can consume more until that number is word aligned.
+
+when writing, we can save the length of the buffer at the start and then check
+it at the end to figure out how much we've written, then add padding until it's
+world aligned.

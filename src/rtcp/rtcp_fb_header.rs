@@ -1,4 +1,4 @@
-use parsely::*;
+use parsely_rs::*;
 
 /// https://datatracker.ietf.org/doc/html/rfc4585#section-6.1
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+

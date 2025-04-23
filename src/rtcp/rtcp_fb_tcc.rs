@@ -11,7 +11,7 @@ use bit_cursor::{
     },
 };
 
-use crate::{util::consume_padding, PacketBuffer, PacketBufferMut};
+use crate::{util::consume_padding, BitBuf, BitBufMut};
 
 use super::{
     rtcp_fb_header::{write_rtcp_fb_header, RtcpFbHeader},
@@ -69,7 +69,7 @@ impl RtcpFbTccPacket {
     pub const FMT: u5 = u5::new(15);
 }
 
-pub fn read_rtcp_fb_tcc<B: PacketBuffer>(
+pub fn read_rtcp_fb_tcc<B: BitBuf>(
     buf: &mut B,
     header: RtcpHeader,
     fb_header: RtcpFbHeader,
@@ -96,7 +96,7 @@ pub fn read_rtcp_fb_tcc<B: PacketBuffer>(
     todo!()
 }
 
-fn read_rtcp_fb_tcc_data<B: PacketBuffer>(buf: &mut B) -> Result<(Vec<PacketReport>, u24, u8)> {
+fn read_rtcp_fb_tcc_data<B: BitBuf>(buf: &mut B) -> Result<(Vec<PacketReport>, u24, u8)> {
     let base_seq_num = buf.read_u16::<NetworkOrder>().context("base seq num")?;
     let packet_status_count = buf
         .read_u16::<NetworkOrder>()
@@ -155,7 +155,7 @@ enum SomeRecvDelta {
     LargeOrNegative(i16),
 }
 
-fn write_some_recv_delta<B: PacketBufferMut>(buf: &mut B, delta: SomeRecvDelta) -> Result<()> {
+fn write_some_recv_delta<B: BitBufMut>(buf: &mut B, delta: SomeRecvDelta) -> Result<()> {
     match delta {
         SomeRecvDelta::Small(d) => Ok(buf.write_u8(d)?),
         // TODO: need support for writing a signed int here
@@ -163,7 +163,7 @@ fn write_some_recv_delta<B: PacketBufferMut>(buf: &mut B, delta: SomeRecvDelta) 
     }
 }
 
-fn write_rtcp_fb_tcc<B: PacketBufferMut>(buf: &mut B, fb_tcc: &RtcpFbTccPacket) -> Result<()> {
+fn write_rtcp_fb_tcc<B: BitBufMut>(buf: &mut B, fb_tcc: &RtcpFbTccPacket) -> Result<()> {
     write_rtcp_header(buf, &fb_tcc.header).context("rtcp header")?;
     write_rtcp_fb_header(buf, &fb_tcc.fb_header).context("fb header")?;
 
@@ -175,7 +175,7 @@ fn write_rtcp_fb_tcc<B: PacketBufferMut>(buf: &mut B, fb_tcc: &RtcpFbTccPacket) 
 
 /// Write the FB TCC packet data.  Note that `packet_reports` should be a _continuous_ set of
 /// reports: all NotReceived values should have already been inserted.
-fn write_rtcp_fb_tcc_data<B: PacketBufferMut>(
+fn write_rtcp_fb_tcc_data<B: BitBufMut>(
     buf: &mut B,
     packet_reports: &[PacketReport],
     reference_time: u24,
@@ -387,7 +387,7 @@ impl IntoIterator for StatusVectorChunk {
 }
 
 /// This method assumes buf's position is at the symbol-size bit.
-pub fn read_status_vector_chunk<B: PacketBuffer>(
+pub fn read_status_vector_chunk<B: BitBuf>(
     buf: &mut B,
     max_symbol_count: usize,
 ) -> Result<StatusVectorChunk> {
@@ -427,7 +427,7 @@ pub fn read_status_vector_chunk<B: PacketBuffer>(
     Ok(StatusVectorChunk(packet_status_symbols))
 }
 
-pub fn write_status_vector_chunk<B: PacketBufferMut>(
+pub fn write_status_vector_chunk<B: BitBufMut>(
     sv_chunk: StatusVectorChunk,
     buf: &mut B,
 ) -> Result<()> {
@@ -505,7 +505,7 @@ impl IntoIterator for RunLengthEncodingChunk {
 }
 
 /// This method assumes buf's position is at the packet status symbol bit
-pub fn read_run_length_encoding_chunk<B: PacketBuffer>(
+pub fn read_run_length_encoding_chunk<B: BitBuf>(
     buf: &mut B,
 ) -> Result<RunLengthEncodingChunk> {
     let symbol = buf
@@ -518,7 +518,7 @@ pub fn read_run_length_encoding_chunk<B: PacketBuffer>(
     Ok(RunLengthEncodingChunk { symbol, run_length })
 }
 
-pub fn write_run_length_encoding_chunk<B: PacketBufferMut>(
+pub fn write_run_length_encoding_chunk<B: BitBufMut>(
     rle_chunk: RunLengthEncodingChunk,
     buf: &mut B,
 ) -> Result<()> {
@@ -579,7 +579,7 @@ impl IntoIterator for SomePacketStatusChunk {
     }
 }
 
-fn read_some_packet_status_chunk<B: PacketBuffer>(
+fn read_some_packet_status_chunk<B: BitBuf>(
     buf: &mut B,
     max_symbol_count: usize,
 ) -> Result<SomePacketStatusChunk> {
@@ -595,7 +595,7 @@ fn read_some_packet_status_chunk<B: PacketBuffer>(
     }
 }
 
-pub(crate) fn write_some_packet_status_chunk<B: PacketBufferMut>(
+pub(crate) fn write_some_packet_status_chunk<B: BitBufMut>(
     chunk: SomePacketStatusChunk,
     buf: &mut B,
 ) -> Result<()> {

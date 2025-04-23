@@ -1,6 +1,4 @@
-use crate::{PacketBuffer, PacketBufferMut};
-use anyhow::{bail, Context};
-use parsely::*;
+use parsely_rs::*;
 
 use super::{
     rtcp_fb_header::RtcpFbHeader, rtcp_fb_packet::RtcpFbPsPacket, rtcp_header::RtcpHeader,
@@ -25,11 +23,7 @@ use super::{
 /// A FIR message MAY contain requests to multiple media senders, using
 /// one FCI entry per target media sender.
 #[derive(Debug, ParselyRead, ParselyWrite, PartialEq)]
-#[parsely_read(
-    buffer_type = "PacketBuffer",
-    required_context("header: RtcpHeader", "fb_header: RtcpFbHeader")
-)]
-#[parsely_write(buffer_type = "PacketBufferMut")]
+#[parsely_read(required_context("header: RtcpHeader", "fb_header: RtcpFbHeader"))]
 pub struct RtcpFbFirPacket {
     #[parsely_read(assign_from = "header")]
     #[parsely(assertion = "|header: &RtcpHeader| header.report_count == RtcpFbFirPacket::FMT")]
@@ -38,7 +32,7 @@ pub struct RtcpFbFirPacket {
     #[parsely_read(assign_from = "fb_header")]
     #[parsely(assertion = "|fb_header: &RtcpFbHeader| fb_header.media_source_ssrc == 0")]
     pub fb_header: RtcpFbHeader,
-    #[parsely_read(while_pred = "buf.bytes_remaining() > 0")]
+    #[parsely_read(while_pred = "buf.remaining_bytes() > 0")]
     pub fcis: Vec<RtcpFbFirFci>,
 }
 
@@ -89,8 +83,6 @@ impl RtcpFbFirFci {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Seek;
-
     use crate::rtcp::rtcp_fb_packet::RtcpFbPsPacket;
 
     use super::*;
@@ -107,9 +99,9 @@ mod tests {
             0x00, 0x00, 0x00
         ];
 
-        let mut cursor = BitCursor::from_vec(data);
+        let mut buf = Bits::from_owner_bytes(data);
 
-        let fci = RtcpFbFirFci::read::<NetworkOrder>(&mut cursor, ()).expect("successful read");
+        let fci = RtcpFbFirFci::read::<NetworkOrder>(&mut buf, ()).expect("successful read");
         assert_eq!(fci.ssrc, 42);
         assert_eq!(fci.seq_num, 1);
     }
@@ -117,14 +109,12 @@ mod tests {
     #[test]
     fn test_write_fci() {
         let fci = RtcpFbFirFci::new(42, 1);
-        let data = vec![0; 8];
-        let mut cursor = BitCursor::from_vec(data);
+        let mut buf_mut = BitsMut::new();
 
-        fci.write::<NetworkOrder>(&mut cursor, ())
+        fci.write::<NetworkOrder>(&mut buf_mut, ())
             .expect("successful write");
-        let _ = cursor.rewind();
-        let read_fci =
-            RtcpFbFirFci::read::<NetworkOrder>(&mut cursor, ()).expect("successful read");
+        let mut buf = buf_mut.freeze();
+        let read_fci = RtcpFbFirFci::read::<NetworkOrder>(&mut buf, ()).expect("successful read");
         assert_eq!(fci, read_fci);
     }
 
@@ -139,7 +129,7 @@ mod tests {
             // reserved
             0x00, 0x00, 0x00
         ];
-        let mut cursor = BitCursor::from_vec(data);
+        let mut buf = Bits::from_owner_bytes(data);
         let header = RtcpHeader {
             report_count: RtcpFbFirPacket::FMT,
             packet_type: RtcpFbPsPacket::PT,
@@ -148,9 +138,9 @@ mod tests {
         };
         let fb_header = RtcpFbHeader::new(42, 0);
 
-        let fb_fir_packet = RtcpFbFirPacket::read::<NetworkOrder>(&mut cursor, (header, fb_header))
+        let fb_fir_packet = RtcpFbFirPacket::read::<NetworkOrder>(&mut buf, (header, fb_header))
             .expect("successful read");
-        assert_eq!(cursor.bytes_remaining(), 0);
+        assert_eq!(buf.remaining_bytes(), 0);
         assert_eq!(fb_fir_packet.fcis.len(), 1);
         let fci = &fb_fir_packet.fcis[0];
         assert_eq!(fci.ssrc, 42);
@@ -174,7 +164,7 @@ mod tests {
             // reserved
             0x00, 0x00, 0x00,
         ];
-        let mut cursor = BitCursor::from_vec(data);
+        let mut buf = Bits::from_owner_bytes(data);
         let header = RtcpHeader {
             report_count: RtcpFbFirPacket::FMT,
             packet_type: RtcpFbPsPacket::PT,
@@ -183,9 +173,9 @@ mod tests {
         };
         let fb_header = RtcpFbHeader::new(42, 0);
 
-        let fb_fir_packet = RtcpFbFirPacket::read::<NetworkOrder>(&mut cursor, (header, fb_header))
+        let fb_fir_packet = RtcpFbFirPacket::read::<NetworkOrder>(&mut buf, (header, fb_header))
             .expect("successful read");
-        assert_eq!(cursor.bytes_remaining(), 0);
+        assert_eq!(buf.remaining_bytes(), 0);
         assert_eq!(fb_fir_packet.fcis.len(), 2);
         let fci = &fb_fir_packet.fcis[0];
         assert_eq!(fci.ssrc, 42);
@@ -221,19 +211,15 @@ mod tests {
             .add_fci(RtcpFbFirFci::new(42, 1))
             .add_fci(RtcpFbFirFci::new(43, 2));
         rtcp_fb_fir.sync(()).unwrap();
-        let data = vec![0; 32];
-        let mut cursor = BitCursor::from_vec(data);
+        let mut buf_mut = BitsMut::new();
 
-        rtcp_fb_fir.write::<NetworkOrder>(&mut cursor, ()).unwrap();
-        let length = cursor.position() as usize;
-        let _ = cursor.rewind();
-        let mut read_cursor = cursor.sub_buffer(0..length);
+        rtcp_fb_fir.write::<NetworkOrder>(&mut buf_mut, ()).unwrap();
+        let mut buf = buf_mut.freeze();
 
-        let rtcp_header = RtcpHeader::read::<NetworkOrder>(&mut read_cursor, ()).unwrap();
-        let rtcp_fb_header = RtcpFbHeader::read::<NetworkOrder>(&mut read_cursor, ()).unwrap();
+        let rtcp_header = RtcpHeader::read::<NetworkOrder>(&mut buf, ()).unwrap();
+        let rtcp_fb_header = RtcpFbHeader::read::<NetworkOrder>(&mut buf, ()).unwrap();
         let read_rtcp_fb_fir =
-            RtcpFbFirPacket::read::<NetworkOrder>(&mut read_cursor, (rtcp_header, rtcp_fb_header))
-                .unwrap();
+            RtcpFbFirPacket::read::<NetworkOrder>(&mut buf, (rtcp_header, rtcp_fb_header)).unwrap();
         assert_eq!(rtcp_fb_fir, read_rtcp_fb_fir);
     }
 }

@@ -1,7 +1,5 @@
 use anyhow::Context;
-use parsely::*;
-
-use crate::{PacketBuffer, PacketBufferMut};
+use parsely_rs::*;
 
 use super::rtcp_header::RtcpHeader;
 
@@ -30,22 +28,23 @@ impl PartialEq<&str> for RtcpByeReason {
     }
 }
 
-impl<B: PacketBuffer> ParselyRead<B, ()> for RtcpByeReason {
+impl<B: BitBuf> ParselyRead<B, ()> for RtcpByeReason {
     /// Note that this assumes it's been checked that there is data remaining in this buffer
     fn read<T: ByteOrder>(buf: &mut B, _ctx: ()) -> ParselyResult<Self> {
-        let length_bytes = buf.read_u8().context("Reading reason length bytes")?;
+        let length_bytes = buf.get_u8().context("Reading reason length bytes")?;
         let mut data = vec![0; length_bytes as usize];
-        buf.read_exact(&mut data).context("Reading reason data")?;
+        buf.try_copy_to_slice_bytes(&mut data[..])
+            .context("Reading reason data")?;
         let reason_str = String::from_utf8(data).context("Converting reason data to string")?;
         Ok(RtcpByeReason(reason_str))
     }
 }
 
-impl<B: PacketBufferMut> ParselyWrite<B, ()> for RtcpByeReason {
+impl<B: BitBufMut> ParselyWrite<B, ()> for RtcpByeReason {
     fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: ()) -> ParselyResult<()> {
-        buf.write_u8(self.length_bytes() as u8)
+        buf.put_u8(self.length_bytes() as u8)
             .context("Writing reason string length")?;
-        buf.write(self.0.as_bytes())
+        buf.try_put_slice_bytes(self.0.as_bytes())
             .context("Writing reason string")?;
 
         Ok(())
@@ -65,21 +64,18 @@ impl<B: PacketBufferMut> ParselyWrite<B, ()> for RtcpByeReason {
 /// (opt) |     length    |               reason for leaving            ...
 ///       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 #[derive(Debug, PartialEq, ParselyRead, ParselyWrite)]
-#[parsely_read(
-    buffer_type = "PacketBuffer",
-    required_context("rtcp_header: RtcpHeader")
-)]
-#[parsely_write(buffer_type = "PacketBufferMut")]
+#[parsely_read(required_context("rtcp_header: RtcpHeader"))]
+#[parsely(alignment = 4)]
 pub struct RtcpByePacket {
     #[parsely_read(assign_from = "rtcp_header")]
     // TODO: should we do a falliable conversion here when passing self.ssrcs.len()? Do we need to
-    // support sync_with expressions being falliable?
+    // support sync_with expressions being falliable?  Maybe we can wrap it in such a way that it
+    // could abstract over an expression that might return T or Result<T>.
     #[parsely_write(sync_with("self.payload_length_bytes()", "u5::new(self.ssrcs.len() as u8)"))]
     pub header: RtcpHeader,
     #[parsely_read(count = "header.report_count.into()")]
     pub ssrcs: Vec<u32>,
-    #[parsely_read(when = "buf.bytes_remaining() > 0", after = "buf.consume_padding()")]
-    #[parsely_write(after = "buf.add_padding()")]
+    #[parsely_read(when = "buf.remaining_bytes() > 0")]
     pub reason: Option<RtcpByeReason>,
 }
 
@@ -150,8 +146,8 @@ mod tests {
         ];
         // add reason bytes
         payload.extend(reason_bytes.collect::<Vec<u8>>());
-        let mut buf = BitCursor::from_vec(payload);
-        let rtcp_bye = RtcpByePacket::read::<NetworkOrder>(&mut buf, (TEST_RTCP_HEADER,)).unwrap();
+        let mut bits = Bits::from_owner_bytes(payload);
+        let rtcp_bye = RtcpByePacket::read::<NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,)).unwrap();
         assert!(rtcp_bye.ssrcs.contains(&1u32));
         assert!(rtcp_bye.ssrcs.contains(&2u32));
         assert_eq!(rtcp_bye.reason.unwrap(), reason_str);
@@ -166,8 +162,8 @@ mod tests {
             // ssrc 2
             0x00, 0x00, 0x00, 0x02,
         ];
-        let mut buf = BitCursor::from_vec(payload);
-        let rtcp_bye = RtcpByePacket::read::<NetworkOrder>(&mut buf, (TEST_RTCP_HEADER,)).unwrap();
+        let mut bits = Bits::from_owner_bytes(payload);
+        let rtcp_bye = RtcpByePacket::read::<NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,)).unwrap();
         assert!(rtcp_bye.ssrcs.contains(&1u32));
         assert!(rtcp_bye.ssrcs.contains(&2u32));
         assert!(rtcp_bye.reason.is_none());
@@ -176,8 +172,8 @@ mod tests {
     #[test]
     fn test_read_missing_ssrc() {
         // Report count (source count) is 2 in header, but we'll just have 1 SSRC in the payload
-        let mut buf = BitCursor::from_vec(vec![1, 2, 3, 4]);
-        let result = RtcpByePacket::read::<NetworkOrder>(&mut buf, (TEST_RTCP_HEADER,));
+        let mut bits = Bits::from_static_bytes(&[1, 2, 3, 4]);
+        let result = RtcpByePacket::read::<NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,));
         assert!(result.is_err());
     }
 
@@ -192,8 +188,8 @@ mod tests {
             // length 2, invalid utf 8
             0x02, 0xFF, 0xFF
         ];
-        let mut buf = BitCursor::from_vec(payload);
-        let result = RtcpByePacket::read::<NetworkOrder>(&mut buf, (TEST_RTCP_HEADER,));
+        let mut bits = Bits::from_owner_bytes(payload);
+        let result = RtcpByePacket::read::<NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,));
         assert!(result.is_err());
     }
 
@@ -214,11 +210,11 @@ mod tests {
         payload.extend(reason_bytes.collect::<Vec<u8>>());
         // 2 bytes of padding
         payload.extend([0x00, 0x00]);
-        let mut buf = BitCursor::from_vec(payload);
+        let mut buf = Bits::from_owner_bytes(payload);
         let _rtcp_bye = RtcpByePacket::read::<NetworkOrder>(&mut buf, (TEST_RTCP_HEADER,))
             .expect("Successful read");
         // Make sure the buffer was fully consumed
-        assert_eq!(buf.bytes_remaining(), 0);
+        assert_eq!(buf.remaining_bytes(), 0);
     }
 
     #[test]
@@ -243,23 +239,21 @@ mod tests {
         };
         rtcp_bye.sync(()).unwrap();
         let syncd_rtcp_header = rtcp_bye.header.clone();
-        let buf = vec![0; 32];
-        let mut cursor = BitCursor::from_vec(buf);
+        let mut buf_mut = BitsMut::new();
 
         rtcp_bye
-            .write::<NetworkOrder>(&mut cursor, ())
+            .write::<NetworkOrder>(&mut buf_mut, ())
             .expect("successful write");
 
         // Now read from the buffer and compare
-        let data = cursor.into_inner();
-        let mut read_cursor = BitCursor::new(data);
+        let mut buf = buf_mut.freeze();
         let read_rtcp_header =
-            RtcpHeader::read::<NetworkOrder>(&mut read_cursor, ()).expect("successul read");
+            RtcpHeader::read::<NetworkOrder>(&mut buf, ()).expect("successul read");
         assert_eq!(read_rtcp_header, syncd_rtcp_header);
-        let mut bye_subcursor = read_cursor
-            .sub_cursor(0..((read_rtcp_header.payload_length_bytes().unwrap() * 8) as usize));
+        let payload_length_bytes = read_rtcp_header.payload_length_bytes().unwrap();
+        let mut bye_subbuf = (&mut buf).take_bytes(payload_length_bytes as usize);
         let read_rtcp_bye =
-            RtcpByePacket::read::<NetworkOrder>(&mut bye_subcursor, (read_rtcp_header,))
+            RtcpByePacket::read::<NetworkOrder>(&mut bye_subbuf, (read_rtcp_header,))
                 .expect("successful read");
 
         assert_eq!(rtcp_bye, read_rtcp_bye);
@@ -274,23 +268,21 @@ mod tests {
         };
         rtcp_bye.sync(()).unwrap();
         let syncd_rtcp_header = rtcp_bye.header.clone();
-        let buf = vec![0; 32];
-        let mut cursor = BitCursor::from_vec(buf);
+        let mut buf_mut = BitsMut::new();
 
         rtcp_bye
-            .write::<NetworkOrder>(&mut cursor, ())
+            .write::<NetworkOrder>(&mut buf_mut, ())
             .expect("successful write");
 
         // Now read from the buffer and compare
-        let data = cursor.into_inner();
-        let mut read_cursor = BitCursor::new(data);
+        let mut buf = buf_mut.freeze();
         let read_rtcp_header =
-            RtcpHeader::read::<NetworkOrder>(&mut read_cursor, ()).expect("successul read");
+            RtcpHeader::read::<NetworkOrder>(&mut buf, ()).expect("successul read");
         assert_eq!(read_rtcp_header, syncd_rtcp_header);
-        let mut bye_subcursor = read_cursor
-            .sub_cursor(0..((read_rtcp_header.payload_length_bytes().unwrap() * 8) as usize));
+        let payload_length_bytes = read_rtcp_header.payload_length_bytes().unwrap();
+        let mut bye_subbuf = (&mut buf).take_bytes(payload_length_bytes as usize);
         let read_rtcp_bye =
-            RtcpByePacket::read::<NetworkOrder>(&mut bye_subcursor, (read_rtcp_header,))
+            RtcpByePacket::read::<NetworkOrder>(&mut bye_subbuf, (read_rtcp_header,))
                 .expect("successful read");
 
         assert_eq!(rtcp_bye, read_rtcp_bye);
@@ -304,14 +296,13 @@ mod tests {
             reason: Some(RtcpByeReason::new("G")),
         };
         rtcp_bye.sync(()).unwrap();
-        let buf = vec![0; 32];
-        let mut cursor = BitCursor::from_vec(buf);
+        let mut buf_mut = BitsMut::new();
 
         rtcp_bye
-            .write::<NetworkOrder>(&mut cursor, ())
+            .write::<NetworkOrder>(&mut buf_mut, ())
             .expect("successful write");
 
         // Make sure we landed on a word boundary
-        assert!(cursor.position() % 32 == 0);
+        assert!(buf_mut.len() % 32 == 0);
     }
 }

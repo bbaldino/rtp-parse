@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
-use anyhow::{anyhow, Context, Result};
-use parsely::*;
+use anyhow::{anyhow, Result};
+use parsely_rs::*;
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.1
 ///  0                   1                   2                   3
@@ -77,10 +77,9 @@ mod tests {
 
     #[test]
     fn test_read_rtcp_header() {
-        let data: Vec<u8> = vec![0b10_0_00001, 202, 0, 42];
-        let mut cursor = BitCursor::from_vec(data);
+        let mut buf = Bits::from_static_bytes(&[0b10_0_00001, 202, 0, 42]);
 
-        let header = RtcpHeader::read::<NetworkOrder>(&mut cursor, ())
+        let header = RtcpHeader::read::<NetworkOrder>(&mut buf, ())
             .context("rtcp header")
             .unwrap();
         assert_eq!(header.version, u2::new(2));
@@ -100,16 +99,14 @@ mod tests {
             length_field: 2,
         };
 
-        let data: Vec<u8> = vec![0; 4];
-        let mut cursor = BitCursor::from_vec(data);
+        let mut buf_mut = BitsMut::new();
 
         header
-            .write::<NetworkOrder>(&mut cursor, ())
+            .write::<NetworkOrder>(&mut buf_mut, ())
             .expect("successful write");
-        let data = cursor.into_inner();
 
-        let mut read_cursor = BitCursor::new(data);
-        let read_header = RtcpHeader::read::<NetworkOrder>(&mut read_cursor, ())
+        let mut buf = buf_mut.freeze();
+        let read_header = RtcpHeader::read::<NetworkOrder>(&mut buf, ())
             .context("rtcp header")
             .unwrap();
         assert_eq!(header, read_header);

@@ -1,9 +1,7 @@
 use std::str::from_utf8;
 
 use anyhow::{Context, Result};
-use parsely::*;
-
-use crate::{PacketBuffer, PacketBufferMut};
+use parsely_rs::*;
 
 use super::rtcp_header::RtcpHeader;
 
@@ -34,8 +32,7 @@ use super::rtcp_header::RtcpHeader;
 ///     the P bit in the RTCP header.  A chunk with zero items (four null
 ///     octets) is valid but useless.
 #[derive(Debug, ParselyRead, ParselyWrite, PartialEq)]
-#[parsely_read(buffer_type = "PacketBuffer", required_context("header: RtcpHeader"))]
-#[parsely_write(buffer_type = "PacketBufferMut")]
+#[parsely_read(required_context("header: RtcpHeader"))]
 pub struct RtcpSdesPacket {
     #[parsely_read(assign_from = "header")]
     #[parsely_write(sync_with("self.payload_length_bytes()", "u5::new(self.chunks.len() as u8)"))]
@@ -101,16 +98,17 @@ impl SdesItem {
     }
 }
 
-impl<B: PacketBuffer> ParselyRead<B, ()> for SdesItem {
+impl<B: BitBuf> ParselyRead<B, ()> for SdesItem {
     fn read<T: ByteOrder>(buf: &mut B, _ctx: ()) -> ParselyResult<Self> {
-        let id = buf.read_u8().context("id")?;
+        let id = buf.get_u8().context("id")?;
 
         if id == 0 {
             return Ok(SdesItem::Empty);
         }
-        let length = buf.read_u8().context("length")? as usize;
+        let length = buf.get_u8().context("length")? as usize;
         let mut value_bytes = vec![0u8; length];
-        buf.read_exact(&mut value_bytes).context("value")?;
+        buf.try_copy_to_slice_bytes(&mut value_bytes)
+            .context("value")?;
         match id {
             1 => Ok(SdesItem::Cname(from_utf8(&value_bytes)?.to_owned())),
             t => Ok(SdesItem::Unknown {
@@ -121,25 +119,24 @@ impl<B: PacketBuffer> ParselyRead<B, ()> for SdesItem {
     }
 }
 
-impl<B: PacketBufferMut> ParselyWrite<B, ()> for SdesItem {
+impl<B: BitBufMut> ParselyWrite<B, ()> for SdesItem {
     fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: ()) -> ParselyResult<()> {
         match self {
             SdesItem::Empty => {
-                buf.write_u8(0).context("id")?;
+                buf.put_u8(0).context("id")?;
             }
             SdesItem::Cname(value) => {
-                buf.write_u8(1).context("id")?;
+                buf.put_u8(1).context("id")?;
                 let bytes = value.as_bytes();
-                buf.write_u8(bytes.len() as u8).context("length")?;
-                buf.write(bytes).context("value")?;
+                buf.put_u8(bytes.len() as u8).context("length")?;
+                buf.try_put_slice_bytes(bytes).context("value")?;
             }
             SdesItem::Unknown { item_type, data } => {
-                buf.write_u8(*item_type).context("id")?;
-                buf.write_u8(data.len() as u8).context("length")?;
-                buf.write(data).context("value")?;
+                buf.put_u8(*item_type).context("id")?;
+                buf.put_u8(data.len() as u8).context("length")?;
+                buf.try_put_slice_bytes(&data[..]).context("value")?;
             }
         }
-
         Ok(())
     }
 }
@@ -193,9 +190,10 @@ impl SdesChunk {
     }
 }
 
-impl<B: PacketBuffer> ParselyRead<B, ()> for SdesChunk {
+impl<B: BitBuf> ParselyRead<B, ()> for SdesChunk {
     fn read<T: ByteOrder>(buf: &mut B, _ctx: ()) -> ParselyResult<Self> {
-        let ssrc = buf.read_u32::<NetworkOrder>().context("ssrc")?;
+        let remaining_start = buf.remaining_bytes();
+        let ssrc = buf.get_u32::<NetworkOrder>().context("ssrc")?;
         let mut sdes_items: Vec<SdesItem> = Vec::new();
         loop {
             let sdes_item = SdesItem::read::<T>(buf, ()).context("item")?;
@@ -204,16 +202,20 @@ impl<B: PacketBuffer> ParselyRead<B, ()> for SdesChunk {
             }
             sdes_items.push(sdes_item);
         }
-
-        buf.consume_padding();
+        let mut consumed = remaining_start - buf.remaining_bytes();
+        while consumed % 4 != 0 {
+            buf.get_u8().unwrap();
+            consumed += 1;
+        }
 
         Ok(SdesChunk { ssrc, sdes_items })
     }
 }
 
-impl<B: PacketBufferMut> ParselyWrite<B, ()> for SdesChunk {
+impl<B: BitBufMut> ParselyWrite<B, ()> for SdesChunk {
     fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: ()) -> ParselyResult<()> {
-        buf.write_u32::<NetworkOrder>(self.ssrc).context("ssrc")?;
+        let remaining_start = buf.remaining_mut_bytes();
+        buf.put_u32::<NetworkOrder>(self.ssrc).context("ssrc")?;
         self.sdes_items
             .iter()
             .enumerate()
@@ -229,15 +231,18 @@ impl<B: PacketBufferMut> ParselyWrite<B, ()> for SdesChunk {
             .write::<T>(buf, ())
             .context("Terminating empty sdes item")?;
 
-        buf.add_padding();
+        let mut amount_written = remaining_start - buf.remaining_mut_bytes();
+        while amount_written % 4 != 0 {
+            buf.put_u8(0).context("padding")?;
+            amount_written += 1;
+        }
+
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::Seek;
-
     use super::*;
 
     fn create_cname_item_bytes(str: &str) -> Vec<u8> {
@@ -253,8 +258,8 @@ mod tests {
         let str = "hello, world!";
         let item_data = create_cname_item_bytes(str);
 
-        let mut buf = BitCursor::from_vec(item_data);
-        let sdes_item = SdesItem::read::<NetworkOrder>(&mut buf, ()).expect("successful read");
+        let mut bits = Bits::from_owner_bytes(item_data);
+        let sdes_item = SdesItem::read::<NetworkOrder>(&mut bits, ()).expect("successful read");
         match sdes_item {
             SdesItem::Cname(v) => assert_eq!(v, str),
             _ => panic!("Wrong SdesItem type"),
@@ -267,8 +272,8 @@ mod tests {
         let mut item_data = vec![0x1, data.len() as u8];
         item_data.extend(data);
 
-        let mut buf = BitCursor::from_vec(item_data);
-        let res = SdesItem::read::<NetworkOrder>(&mut buf, ());
+        let mut bits = Bits::from_owner_bytes(item_data);
+        let res = SdesItem::read::<NetworkOrder>(&mut bits, ());
         assert!(res.is_err());
     }
 
@@ -276,18 +281,18 @@ mod tests {
     fn test_read_sdes_item() {
         // Cname item
         let data = create_cname_item_bytes("hello");
-        let mut cursor = BitCursor::from_vec(data);
+        let mut bits = Bits::from_owner_bytes(data);
 
-        let item = SdesItem::read::<NetworkOrder>(&mut cursor, ()).expect("successful read");
+        let item = SdesItem::read::<NetworkOrder>(&mut bits, ()).expect("successful read");
         match item {
             SdesItem::Cname(s) => assert_eq!("hello", s),
             _ => panic!("Expected cname item"),
         }
         // unknown item
         let data: Vec<u8> = vec![0x6, 0x4, 0xDE, 0xAD, 0xBE, 0xEF];
-        let mut cursor = BitCursor::from_vec(data);
+        let mut bits = Bits::from_owner_bytes(data);
 
-        let item = SdesItem::read::<NetworkOrder>(&mut cursor, ()).expect("successful read");
+        let item = SdesItem::read::<NetworkOrder>(&mut bits, ()).expect("successful read");
         match item {
             SdesItem::Unknown { item_type, data } => {
                 assert_eq!(item_type, 6);
@@ -300,15 +305,14 @@ mod tests {
     #[test]
     fn test_write_sdes_item() {
         let item = SdesItem::cname("hello");
-        let data: Vec<u8> = vec![0; 32];
-        let mut cursor = BitCursor::from_vec(data);
+        let mut bits_mut = BitsMut::new();
 
-        item.write::<NetworkOrder>(&mut cursor, ())
+        item.write::<NetworkOrder>(&mut bits_mut, ())
             .expect("successful write");
 
-        let _ = cursor.rewind();
+        let mut bits = bits_mut.freeze();
 
-        let read_item = SdesItem::read::<NetworkOrder>(&mut cursor, ()).expect("successful read");
+        let read_item = SdesItem::read::<NetworkOrder>(&mut bits, ()).expect("successful read");
         assert_eq!(item, read_item);
     }
 
@@ -318,33 +322,31 @@ mod tests {
             item_type: 0x5,
             data: vec![0x42, 0x24],
         };
-        let data: Vec<u8> = vec![0; 32];
-        let mut cursor = BitCursor::from_vec(data);
+        let mut bits_mut = BitsMut::new();
 
-        item.write::<NetworkOrder>(&mut cursor, ())
+        item.write::<NetworkOrder>(&mut bits_mut, ())
             .expect("successful write");
 
-        let _ = cursor.rewind();
+        let mut bits = bits_mut.freeze();
 
-        let read_item = SdesItem::read::<NetworkOrder>(&mut cursor, ()).expect("successful read");
+        let read_item = SdesItem::read::<NetworkOrder>(&mut bits, ()).expect("successful read");
         assert_eq!(item, read_item);
     }
 
     #[test]
     fn test_read_sdes_chunk() {
         #[rustfmt::skip]
-        let data = vec![
+        let mut bits = Bits::from_static_bytes(&[
             // ssrc (42)
             0x00, 0x00, 0x00, 0x2a,
             // Cname, length 16, value hello
             0x01, 0x5, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
             // Empty sdes item to finish
             0x00,
-        ];
-        let mut cursor = BitCursor::from_vec(data);
+        ]);
 
-        let chunk = SdesChunk::read::<NetworkOrder>(&mut cursor, ()).expect("successful read");
-        assert_eq!(cursor.bytes_remaining(), 0);
+        let chunk = SdesChunk::read::<NetworkOrder>(&mut bits, ()).expect("successful read");
+        assert_eq!(bits.remaining_bytes(), 0);
         assert_eq!(chunk.ssrc, 42);
         assert_eq!(chunk.sdes_items.len(), 1);
         let item = &chunk.sdes_items[0];
@@ -354,7 +356,7 @@ mod tests {
     #[test]
     fn tesd_read_sdes_chunks() {
         #[rustfmt::skip]
-        let data = vec![
+        let mut bits = Bits::from_static_bytes(&[
             // ssrc (42)
             0x00, 0x00, 0x00, 0x2a,
             // Cname, length 16, value hello
@@ -363,11 +365,10 @@ mod tests {
             0x04, 0x2, 0x42, 0x24,
             // Empty sdes item to finish
             0x00,
-        ];
-        let mut cursor = BitCursor::from_vec(data);
+        ]);
 
-        let chunk = SdesChunk::read::<NetworkOrder>(&mut cursor, ()).expect("successful read");
-        assert_eq!(cursor.bytes_remaining(), 0);
+        let chunk = SdesChunk::read::<NetworkOrder>(&mut bits, ()).expect("successful read");
+        assert_eq!(bits.remaining_bytes(), 0);
         assert_eq!(chunk.ssrc, 42);
         assert_eq!(chunk.sdes_items.len(), 2);
         let item = &chunk.sdes_items[0];
@@ -385,7 +386,7 @@ mod tests {
     #[test]
     fn test_read_sdes_chunks_no_termination() {
         #[rustfmt::skip]
-        let data = vec![
+        let mut bits = Bits::from_static_bytes(&[
             // ssrc (42)
             0x00, 0x00, 0x00, 0x2a,
             // Cname, length 16, value hello
@@ -393,10 +394,9 @@ mod tests {
             // Unknown
             0x04, 0x2, 0x42, 0x24,
             // No empty item to finish
-        ];
-        let mut cursor = BitCursor::from_vec(data);
+        ]);
 
-        let chunk = SdesChunk::read::<NetworkOrder>(&mut cursor, ());
+        let chunk = SdesChunk::read::<NetworkOrder>(&mut bits, ());
         assert!(chunk.is_err());
     }
 
@@ -409,12 +409,12 @@ mod tests {
                 data: vec![0x42, 0x24],
             });
 
-        let mut cursor = BitCursor::from_vec(vec![0; 32]);
+        let mut bits_mut = BitsMut::new();
         chunk
-            .write::<NetworkOrder>(&mut cursor, ())
+            .write::<NetworkOrder>(&mut bits_mut, ())
             .expect("successful write");
-        let _ = cursor.rewind();
-        let read_chunk = SdesChunk::read::<NetworkOrder>(&mut cursor, ()).expect("successful read");
+        let mut bits = bits_mut.freeze();
+        let read_chunk = SdesChunk::read::<NetworkOrder>(&mut bits, ()).expect("successful read");
         assert_eq!(chunk, read_chunk);
     }
 
@@ -428,7 +428,7 @@ mod tests {
             length_field: 4,
         };
         #[rustfmt::skip]
-        let sdes_chunk = vec![
+        let mut sdes_chunk_bits = Bits::from_static_bytes(&[
             // ssrc (42)
             0x00, 0x00, 0x00, 0x2a,
             // Cname, length 16, value hello
@@ -437,12 +437,11 @@ mod tests {
             0x04, 0x2, 0x42, 0x24,
             // Empty sdes item to finish
             0x00,
-        ];
-        let mut cursor = BitCursor::from_vec(sdes_chunk);
+        ]);
 
-        let sdes =
-            RtcpSdesPacket::read::<NetworkOrder>(&mut cursor, (header,)).expect("Successful read");
-        assert_eq!(cursor.bytes_remaining(), 0);
+        let sdes = RtcpSdesPacket::read::<NetworkOrder>(&mut sdes_chunk_bits, (header,))
+            .expect("Successful read");
+        assert_eq!(sdes_chunk_bits.remaining_bytes(), 0);
         assert_eq!(sdes.chunks.len(), 1);
         let chunk = &sdes.chunks[0];
         assert_eq!(chunk.ssrc, 42);
@@ -459,7 +458,7 @@ mod tests {
             length_field: 9,
         };
         #[rustfmt::skip]
-        let sdes_chunks = vec![
+        let mut sdes_chunks_bits = Bits::from_static_bytes(&[
             // ssrc (42)
             0x00, 0x00, 0x00, 0x2a,
             // Cname, length 16, value hello
@@ -478,12 +477,11 @@ mod tests {
             0x00, 
             // Padding
             0x00, 0x00
-        ];
-        let mut cursor = BitCursor::from_vec(sdes_chunks);
+        ]);
 
-        let sdes =
-            RtcpSdesPacket::read::<NetworkOrder>(&mut cursor, (header,)).expect("Successful read");
-        assert_eq!(cursor.bytes_remaining(), 0);
+        let sdes = RtcpSdesPacket::read::<NetworkOrder>(&mut sdes_chunks_bits, (header,))
+            .expect("Successful read");
+        assert_eq!(sdes_chunks_bits.remaining_bytes(), 0);
         assert_eq!(sdes.chunks.len(), 2);
         let chunk = &sdes.chunks[0];
         assert_eq!(chunk.ssrc, 42);
@@ -520,18 +518,15 @@ mod tests {
 
         rtcp_sdes.sync(()).expect("successful sync");
 
-        let size_bytes = RtcpHeader::SIZE_BYTES + rtcp_sdes.payload_length_bytes() as usize;
-
-        let data = vec![0; size_bytes];
-        let mut cursor = BitCursor::from_vec(data);
+        let mut bits_mut = BitsMut::new();
 
         rtcp_sdes
-            .write::<NetworkOrder>(&mut cursor, ())
+            .write::<NetworkOrder>(&mut bits_mut, ())
             .expect("successful write");
 
-        let _ = cursor.rewind();
-        let rtcp_header = RtcpHeader::read::<NetworkOrder>(&mut cursor, ()).expect("rtcp header");
-        let read_rtcp_sdes = RtcpSdesPacket::read::<NetworkOrder>(&mut cursor, (rtcp_header,))
+        let mut bits = bits_mut.freeze();
+        let rtcp_header = RtcpHeader::read::<NetworkOrder>(&mut bits, ()).expect("rtcp header");
+        let read_rtcp_sdes = RtcpSdesPacket::read::<NetworkOrder>(&mut bits, (rtcp_header,))
             .expect("successful read");
         assert_eq!(read_rtcp_sdes, rtcp_sdes);
     }
