@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use crate::{PacketBuffer, PacketBufferMut};
+use crate::{BitBuf, BitBufMut};
 
 use super::{
     rtcp_fb_header::{write_rtcp_fb_header, RtcpFbHeader},
@@ -23,7 +23,7 @@ impl RtcpFbPliPacket {
     pub const FMT: u5 = u5::new(1);
 }
 
-pub fn read_rtcp_fb_pli<B: PacketBuffer>(
+pub fn read_rtcp_fb_pli<B: BitBuf>(
     _buf: &mut B,
     header: RtcpHeader,
     fb_header: RtcpFbHeader,
@@ -31,7 +31,7 @@ pub fn read_rtcp_fb_pli<B: PacketBuffer>(
     Ok(RtcpFbPliPacket { header, fb_header })
 }
 
-pub fn write_rtcp_fb_pli<B: PacketBufferMut>(buf: &mut B, fb_pli: &RtcpFbPliPacket) -> Result<()> {
+pub fn write_rtcp_fb_pli<B: BitBufMut>(buf: &mut B, fb_pli: &RtcpFbPliPacket) -> Result<()> {
     write_rtcp_header(buf, &fb_pli.header).context("rtcp header")?;
     write_rtcp_fb_header(buf, &fb_pli.fb_header).context("fb header")?;
 

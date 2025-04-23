@@ -12,7 +12,7 @@ use crate::{
         rtcp_report_block::{read_rtcp_report_block, write_rtcp_report_block},
         rtcp_sender_info::{read_rtcp_sender_info, write_rtcp_sender_info},
     },
-    PacketBuffer,
+    BitBuf,
 };
 
 use super::{
@@ -67,7 +67,7 @@ impl RtcpSrPacket {
     pub const PT: u8 = 200;
 }
 
-pub fn read_rtcp_sr<B: PacketBuffer>(buf: &mut B, header: RtcpHeader) -> Result<RtcpSrPacket> {
+pub fn read_rtcp_sr<B: BitBuf>(buf: &mut B, header: RtcpHeader) -> Result<RtcpSrPacket> {
     let sender_ssrc = buf.read_u32::<NetworkOrder>().context("sender ssrc")?;
     let sender_info = read_rtcp_sender_info(buf).context("sender info")?;
     let report_blocks = (0u32..header.report_count.into())

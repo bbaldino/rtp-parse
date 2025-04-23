@@ -1,12 +1,55 @@
-use std::str::from_utf8;
+use anyhow::Context;
+use parsely_rs::*;
 
-use anyhow::{Context, Result};
-use bit_cursor::{
-    bit_read::BitRead, bit_read_exts::BitReadExts, bit_write::BitWrite,
-    bit_write_exts::BitWriteExts, byte_order::NetworkOrder,
-};
+use super::rtcp_header::RtcpHeader;
 
-use super::rtcp_header::{write_rtcp_header, RtcpHeader};
+#[derive(Debug, PartialEq)]
+pub struct RtcpByeReason(String);
+
+impl RtcpByeReason {
+    pub fn new(reason: &str) -> Self {
+        Self(reason.to_owned())
+    }
+
+    pub fn length_bytes(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl PartialEq<String> for RtcpByeReason {
+    fn eq(&self, other: &String) -> bool {
+        &self.0 == other
+    }
+}
+
+impl PartialEq<&str> for RtcpByeReason {
+    fn eq(&self, other: &&str) -> bool {
+        &self.0 == other
+    }
+}
+
+impl<B: BitBuf> ParselyRead<B, ()> for RtcpByeReason {
+    /// Note that this assumes it's been checked that there is data remaining in this buffer
+    fn read<T: ByteOrder>(buf: &mut B, _ctx: ()) -> ParselyResult<Self> {
+        let length_bytes = buf.get_u8().context("Reading reason length bytes")?;
+        let mut data = vec![0; length_bytes as usize];
+        buf.try_copy_to_slice_bytes(&mut data[..])
+            .context("Reading reason data")?;
+        let reason_str = String::from_utf8(data).context("Converting reason data to string")?;
+        Ok(RtcpByeReason(reason_str))
+    }
+}
+
+impl<B: BitBufMut> ParselyWrite<B, ()> for RtcpByeReason {
+    fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: ()) -> ParselyResult<()> {
+        buf.put_u8(self.length_bytes() as u8)
+            .context("Writing reason string length")?;
+        buf.try_put_slice_bytes(self.0.as_bytes())
+            .context("Writing reason string")?;
+
+        Ok(())
+    }
+}
 
 /// https://datatracker.ietf.org/doc/html/rfc3550#section-6.6
 ///        0                   1                   2                   3
@@ -20,88 +63,76 @@ use super::rtcp_header::{write_rtcp_header, RtcpHeader};
 ///       +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
 /// (opt) |     length    |               reason for leaving            ...
 ///       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[derive(Debug)]
+#[derive(Debug, PartialEq, ParselyRead, ParselyWrite)]
+#[parsely_read(required_context("rtcp_header: RtcpHeader"))]
+#[parsely(alignment = 4)]
 pub struct RtcpByePacket {
+    #[parsely_read(assign_from = "rtcp_header")]
+    // TODO: should we do a falliable conversion here when passing self.ssrcs.len()? Do we need to
+    // support sync_with expressions being falliable?  Maybe we can wrap it in such a way that it
+    // could abstract over an expression that might return T or Result<T>.
+    #[parsely_write(sync_with("self.payload_length_bytes()", "u5::new(self.ssrcs.len() as u8)"))]
     pub header: RtcpHeader,
+    #[parsely_read(count = "header.report_count.into()")]
     pub ssrcs: Vec<u32>,
-    pub reason: Option<String>,
+    #[parsely_read(when = "buf.remaining_bytes() > 0")]
+    pub reason: Option<RtcpByeReason>,
+}
+
+impl Default for RtcpByePacket {
+    fn default() -> Self {
+        let header = RtcpHeader {
+            packet_type: RtcpByePacket::PT,
+            ..Default::default()
+        };
+        Self {
+            header,
+            ssrcs: Default::default(),
+            reason: Default::default(),
+        }
+    }
 }
 
 impl RtcpByePacket {
     pub const PT: u8 = 203;
-}
 
-pub fn read_rtcp_bye<R: BitRead>(buf: &mut R, header: RtcpHeader) -> Result<RtcpByePacket> {
-    let ssrcs = (0u32..header.report_count.into())
-        .map(|i| {
-            buf.read_u32::<NetworkOrder>()
-                .with_context(|| format!("ssrc-{i}"))
-        })
-        .collect::<Result<Vec<u32>>>()?;
+    pub fn payload_length_bytes(&self) -> u16 {
+        // The payload's length in bytes is the number of ssrcs * 4 plus the reason length and the
+        // leading byte to describe its length (if there is a reason)
+        let mut payload_length_bytes =
+            self.ssrcs.len() * 4 + self.reason.as_ref().map_or(0, |r| r.length_bytes() + 1);
 
-    // Try to read a BYE reason length
-    let reason = {
-        if let Ok(reason_length) = buf.read_u8() {
-            let mut reason_bytes = vec![0; reason_length.into()];
-            std::io::Read::read(buf, &mut reason_bytes).context("bye reason bytes")?;
-            Some(
-                from_utf8(&reason_bytes)
-                    .context("convert bye reason from urf8")
-                    .map(|str| str.to_owned())?,
-            )
-        } else {
-            // Reason is optional, so if there was no data there just mark it as None.
-            // TODO: technically I think we should only do this in the 'failed to fill buffer'
-            // error case? Otherwise it could be a real error of some kind.
-            None
+        while payload_length_bytes % 4 != 0 {
+            payload_length_bytes += 1
         }
-    };
-    Ok(RtcpByePacket {
-        header,
-        ssrcs,
-        reason,
-    })
-}
-
-pub fn write_rtcp_bye<W: BitWrite>(buf: &mut W, packet: &RtcpByePacket) -> Result<()> {
-    write_rtcp_header(buf, &packet.header).context("header")?;
-    packet
-        .ssrcs
-        .iter()
-        .enumerate()
-        .map(|(i, ssrc)| {
-            buf.write_u32::<NetworkOrder>(*ssrc)
-                .with_context(|| format!("ssrc-{i}"))
-        })
-        .collect::<Result<Vec<()>>>()
-        .context("ssrcs")?;
-
-    if let Some(reason) = &packet.reason {
-        let utf8_bytes = reason.as_bytes();
-        buf.write_u8(utf8_bytes.len() as u8)
-            .context("reason length")?;
-        std::io::Write::write(buf, utf8_bytes).context("reason string")?;
+        payload_length_bytes as u16
     }
 
-    Ok(())
+    pub fn add_ssrc(mut self, ssrc: u32) -> Self {
+        self.ssrcs.push(ssrc);
+        self
+    }
+
+    pub fn with_reason(mut self, reason: &str) -> Self {
+        self.reason = Some(RtcpByeReason::new(reason));
+        self
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use bit_cursor::{bit_cursor::BitCursor, nsw_types::*};
-    use bitvec::{order::Msb0, vec::BitVec};
-
     use super::*;
 
+    const TEST_RTCP_HEADER: RtcpHeader = RtcpHeader {
+        version: u2::new(2),
+        has_padding: false,
+        report_count: u5::new(2),
+        packet_type: 203,
+        length_field: 2,
+    };
+
     #[test]
-    fn test_parse_success() {
-        let rtcp_header = RtcpHeader {
-            version: u2::new(2),
-            has_padding: false,
-            report_count: u5::new(2),
-            packet_type: 203,
-            length_field: 2,
-        };
+    fn test_read_success() {
         let reason_str = "goodbye";
         let reason_bytes = reason_str.bytes();
         #[rustfmt::skip]
@@ -115,59 +146,39 @@ mod tests {
         ];
         // add reason bytes
         payload.extend(reason_bytes.collect::<Vec<u8>>());
-        let mut buf = BitCursor::new(BitVec::<_, Msb0>::from_vec(payload));
-        let rtcp_bye = read_rtcp_bye(&mut buf, rtcp_header).unwrap();
+        let mut bits = Bits::from_owner_bytes(payload);
+        let rtcp_bye = RtcpByePacket::read::<NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,)).unwrap();
         assert!(rtcp_bye.ssrcs.contains(&1u32));
         assert!(rtcp_bye.ssrcs.contains(&2u32));
         assert_eq!(rtcp_bye.reason.unwrap(), reason_str);
     }
 
     #[test]
-    fn test_parse_success_no_reason() {
-        let rtcp_header = RtcpHeader {
-            version: u2::new(2),
-            has_padding: false,
-            report_count: u5::new(2),
-            packet_type: 203,
-            length_field: 2,
-        };
+    fn test_read_success_no_reason() {
+        #[rustfmt::skip]
         let payload = vec![
             // ssrc 1
-            0x00, 0x00, 0x00, 0x01, // ssrc 2
+            0x00, 0x00, 0x00, 0x01, 
+            // ssrc 2
             0x00, 0x00, 0x00, 0x02,
         ];
-        let mut buf = BitCursor::new(BitVec::<u8, Msb0>::from_vec(payload));
-        let rtcp_bye = read_rtcp_bye(&mut buf, rtcp_header).unwrap();
+        let mut bits = Bits::from_owner_bytes(payload);
+        let rtcp_bye = RtcpByePacket::read::<NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,)).unwrap();
         assert!(rtcp_bye.ssrcs.contains(&1u32));
         assert!(rtcp_bye.ssrcs.contains(&2u32));
         assert!(rtcp_bye.reason.is_none());
     }
 
     #[test]
-    fn test_missing_ssrc() {
-        let rtcp_header = RtcpHeader {
-            version: u2::new(2),
-            has_padding: false,
-            report_count: u5::new(2),
-            packet_type: 203,
-            length_field: 2,
-        };
-
+    fn test_read_missing_ssrc() {
         // Report count (source count) is 2 in header, but we'll just have 1 SSRC in the payload
-        let mut buf = BitCursor::new(BitVec::<u8, Msb0>::from_vec(vec![1, 2, 3, 4]));
-        let result = read_rtcp_bye(&mut buf, rtcp_header);
+        let mut bits = Bits::from_static_bytes(&[1, 2, 3, 4]);
+        let result = RtcpByePacket::read::<NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,));
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_bad_utf8_reason() {
-        let rtcp_header = RtcpHeader {
-            version: u2::new(2),
-            has_padding: false,
-            report_count: u5::new(2),
-            packet_type: 203,
-            length_field: 2,
-        };
+    fn test_read_bad_utf8_reason() {
         #[rustfmt::skip]
         let payload = vec![
             // ssrc 1
@@ -177,8 +188,121 @@ mod tests {
             // length 2, invalid utf 8
             0x02, 0xFF, 0xFF
         ];
-        let mut buf = BitCursor::new(BitVec::<u8, Msb0>::from_vec(payload));
-        let result = read_rtcp_bye(&mut buf, rtcp_header);
+        let mut bits = Bits::from_owner_bytes(payload);
+        let result = RtcpByePacket::read::<NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_consume_padding() {
+        let reason_str = "g";
+        let reason_bytes = reason_str.bytes();
+        #[rustfmt::skip]
+        let mut payload = vec![
+            // ssrc 1
+            0x00, 0x00, 0x00, 0x01, 
+            // ssrc 2
+            0x00, 0x00, 0x00, 0x02,
+            // reason length
+            reason_bytes.len() as u8
+        ];
+        // add reason bytes
+        payload.extend(reason_bytes.collect::<Vec<u8>>());
+        // 2 bytes of padding
+        payload.extend([0x00, 0x00]);
+        let mut buf = Bits::from_owner_bytes(payload);
+        let _rtcp_bye = RtcpByePacket::read::<NetworkOrder>(&mut buf, (TEST_RTCP_HEADER,))
+            .expect("Successful read");
+        // Make sure the buffer was fully consumed
+        assert_eq!(buf.remaining_bytes(), 0);
+    }
+
+    #[test]
+    fn test_sync() {
+        let mut rtcp_bye = RtcpByePacket::default().add_ssrc(42);
+        rtcp_bye.sync(()).unwrap();
+        assert_eq!(rtcp_bye.header.packet_type, RtcpByePacket::PT);
+        assert_eq!(rtcp_bye.header.report_count, 1);
+        assert_eq!(rtcp_bye.header.length_field, 1);
+
+        let mut rtcp_bye = rtcp_bye.with_reason("goodbye");
+        rtcp_bye.sync(()).unwrap();
+        assert_eq!(rtcp_bye.header.length_field, 3);
+    }
+
+    #[test]
+    fn test_write_success() {
+        let mut rtcp_bye = RtcpByePacket {
+            header: TEST_RTCP_HEADER,
+            ssrcs: vec![42],
+            reason: None,
+        };
+        rtcp_bye.sync(()).unwrap();
+        let syncd_rtcp_header = rtcp_bye.header.clone();
+        let mut buf_mut = BitsMut::new();
+
+        rtcp_bye
+            .write::<NetworkOrder>(&mut buf_mut, ())
+            .expect("successful write");
+
+        // Now read from the buffer and compare
+        let mut buf = buf_mut.freeze();
+        let read_rtcp_header =
+            RtcpHeader::read::<NetworkOrder>(&mut buf, ()).expect("successul read");
+        assert_eq!(read_rtcp_header, syncd_rtcp_header);
+        let payload_length_bytes = read_rtcp_header.payload_length_bytes().unwrap();
+        let mut bye_subbuf = (&mut buf).take_bytes(payload_length_bytes as usize);
+        let read_rtcp_bye =
+            RtcpByePacket::read::<NetworkOrder>(&mut bye_subbuf, (read_rtcp_header,))
+                .expect("successful read");
+
+        assert_eq!(rtcp_bye, read_rtcp_bye);
+    }
+
+    #[test]
+    fn test_write_success_with_reason() {
+        let mut rtcp_bye = RtcpByePacket {
+            header: TEST_RTCP_HEADER,
+            ssrcs: vec![42],
+            reason: Some(RtcpByeReason::new("Goodbye")),
+        };
+        rtcp_bye.sync(()).unwrap();
+        let syncd_rtcp_header = rtcp_bye.header.clone();
+        let mut buf_mut = BitsMut::new();
+
+        rtcp_bye
+            .write::<NetworkOrder>(&mut buf_mut, ())
+            .expect("successful write");
+
+        // Now read from the buffer and compare
+        let mut buf = buf_mut.freeze();
+        let read_rtcp_header =
+            RtcpHeader::read::<NetworkOrder>(&mut buf, ()).expect("successul read");
+        assert_eq!(read_rtcp_header, syncd_rtcp_header);
+        let payload_length_bytes = read_rtcp_header.payload_length_bytes().unwrap();
+        let mut bye_subbuf = (&mut buf).take_bytes(payload_length_bytes as usize);
+        let read_rtcp_bye =
+            RtcpByePacket::read::<NetworkOrder>(&mut bye_subbuf, (read_rtcp_header,))
+                .expect("successful read");
+
+        assert_eq!(rtcp_bye, read_rtcp_bye);
+    }
+
+    #[test]
+    fn test_write_success_with_padding() {
+        let mut rtcp_bye = RtcpByePacket {
+            header: TEST_RTCP_HEADER,
+            ssrcs: vec![42],
+            reason: Some(RtcpByeReason::new("G")),
+        };
+        rtcp_bye.sync(()).unwrap();
+        let mut buf_mut = BitsMut::new();
+
+        rtcp_bye
+            .write::<NetworkOrder>(&mut buf_mut, ())
+            .expect("successful write");
+
+        // Make sure we landed on a word boundary
+        assert!(buf_mut.len() % 32 == 0);
     }
 }
