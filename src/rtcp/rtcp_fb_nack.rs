@@ -137,7 +137,7 @@ impl<B: BitBufMut> ParselyWrite<B, ()> for NackBlock {
         let packet_id = self.missing_seq_nums.first().ok_or(anyhow!(
             "NackBlock must contain at least one sequence number"
         ))?;
-        buf.put_u16::<T>(*packet_id).context("packet it")?;
+        buf.put_u16::<T>(*packet_id).context("packet id")?;
         let mut blp = 0u16;
         // Skip past the first one since it was used for the packet id
         for missing_seq_num in self.missing_seq_nums.iter().skip(1) {
