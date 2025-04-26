@@ -29,8 +29,9 @@ pub enum SomeRtcpPacket {
     },
 }
 
-impl<B: BitBuf> ParselyRead<B, ()> for SomeRtcpPacket {
-    fn read<T: ByteOrder>(buf: &mut B, _ctx: ()) -> ParselyResult<Self> {
+impl ParselyRead for SomeRtcpPacket {
+    type Ctx = ();
+    fn read<B: BitBuf, T: ByteOrder>(buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<Self> {
         let mut packets: Vec<SomeRtcpPacket> = Vec::new();
 
         let mut sub_packet_num = 1;
@@ -52,7 +53,7 @@ impl<B: BitBuf> ParselyRead<B, ()> for SomeRtcpPacket {
 pub fn read_single_rtcp_packet<T: ByteOrder, B: BitBuf>(
     buf: &mut B,
 ) -> ParselyResult<SomeRtcpPacket> {
-    let header = RtcpHeader::read::<T>(buf, ()).context("header")?;
+    let header = RtcpHeader::read::<_, T>(buf, ()).context("header")?;
     let payload_length = header
         .payload_length_bytes()
         .context("header length field")? as usize;
@@ -63,22 +64,22 @@ pub fn read_single_rtcp_packet<T: ByteOrder, B: BitBuf>(
     let mut payload_buffer = buf.take_bytes(payload_length);
     let result: ParselyResult<SomeRtcpPacket> = match header.packet_type {
         RtcpByePacket::PT => Ok(SomeRtcpPacket::RtcpByePacket(
-            RtcpByePacket::read::<T>(&mut payload_buffer, (header,)).context("rtcp bye")?,
+            RtcpByePacket::read::<_, T>(&mut payload_buffer, (header,)).context("rtcp bye")?,
         )),
         RtcpSdesPacket::PT => Ok(SomeRtcpPacket::RtcpSdesPacket(
-            RtcpSdesPacket::read::<T>(&mut payload_buffer, (header,)).context("rtcp sdes")?,
+            RtcpSdesPacket::read::<_, T>(&mut payload_buffer, (header,)).context("rtcp sdes")?,
         )),
         RtcpFbPsPacket::PT | RtcpFbTlPacket::PT => {
             let fb_header =
-                RtcpFbHeader::read::<T>(&mut payload_buffer, ()).context("rtcp fb header")?;
+                RtcpFbHeader::read::<_, T>(&mut payload_buffer, ()).context("rtcp fb header")?;
             match (header.packet_type, header.report_count) {
                 (RtcpFbPsPacket::PT, RtcpFbFirPacket::FMT) => Ok(SomeRtcpPacket::RtcpFbFirPacket(
-                    RtcpFbFirPacket::read::<T>(&mut payload_buffer, (header, fb_header))
+                    RtcpFbFirPacket::read::<_, T>(&mut payload_buffer, (header, fb_header))
                         .context("rtcp fb fir")?,
                 )),
                 (RtcpFbTlPacket::PT, RtcpFbNackPacket::FMT) => {
                     Ok(SomeRtcpPacket::RtcpFbNackPacket(
-                        RtcpFbNackPacket::read::<T>(&mut payload_buffer, (header, fb_header))
+                        RtcpFbNackPacket::read::<_, T>(&mut payload_buffer, (header, fb_header))
                             .context("rtcp fb nack")?,
                     ))
                 }
@@ -104,8 +105,8 @@ pub fn read_single_rtcp_packet<T: ByteOrder, B: BitBuf>(
 //         .payload_length_bytes()
 //         .context("header length field")? as usize;
 //     if payload_length > buf.remaining_bytes() {
-//         bail!("Invalid RTCP packet, length {payload_length} bytes but buf has only {} bytes remaining", buf.remaining_bytes());
-//     }
+//         bail!("Invalid RTCP packet, length {payload_length} bytes but buf has only {} bytes
+// remaining", buf.remaining_bytes());     }
 //     let payload_length_bits = payload_length * 8;
 //     let mut payload_buffer = buf.sub_buffer(0..(payload_length * 8));
 //
@@ -170,14 +171,15 @@ mod tests {
         let packet_size = RtcpHeader::SIZE_BYTES + rtcp_bye.payload_length_bytes() as usize;
         let mut buf_mut = BitsMut::new();
         rtcp_bye
-            .write::<NetworkOrder>(&mut buf_mut, ())
+            .write::<_, NetworkOrder>(&mut buf_mut, ())
             .expect("successful write");
 
         assert_eq!(packet_size, buf_mut.len_bytes());
 
         let mut buf = buf_mut.freeze();
 
-        let result = SomeRtcpPacket::read::<NetworkOrder>(&mut buf, ()).expect("successful read");
+        let result =
+            SomeRtcpPacket::read::<_, NetworkOrder>(&mut buf, ()).expect("successful read");
         dbg!(result);
     }
 }

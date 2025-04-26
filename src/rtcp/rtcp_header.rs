@@ -22,10 +22,10 @@ pub struct RtcpHeader {
     #[parsely(assertion = "|v: &u2| *v == 2")]
     pub version: u2,
     pub has_padding: bool,
-    #[parsely_write(sync_func = "ParselyResult::Ok(report_count_value)")]
+    #[parsely_write(sync_expr = "report_count_value")]
     pub report_count: u5,
     pub packet_type: u8,
-    #[parsely_write(sync_func = "ParselyResult::Ok(payload_length_bytes / 4)")]
+    #[parsely_write(sync_expr = "payload_length_bytes / 4")]
     pub length_field: u16,
 }
 
@@ -79,7 +79,7 @@ mod tests {
     fn test_read_rtcp_header() {
         let mut buf = Bits::from_static_bytes(&[0b10_0_00001, 202, 0, 42]);
 
-        let header = RtcpHeader::read::<NetworkOrder>(&mut buf, ())
+        let header = RtcpHeader::read::<_, NetworkOrder>(&mut buf, ())
             .context("rtcp header")
             .unwrap();
         assert_eq!(header.version, u2::new(2));
@@ -102,11 +102,11 @@ mod tests {
         let mut buf_mut = BitsMut::new();
 
         header
-            .write::<NetworkOrder>(&mut buf_mut, ())
+            .write::<_, NetworkOrder>(&mut buf_mut, ())
             .expect("successful write");
 
         let mut buf = buf_mut.freeze();
-        let read_header = RtcpHeader::read::<NetworkOrder>(&mut buf, ())
+        let read_header = RtcpHeader::read::<_, NetworkOrder>(&mut buf, ())
             .context("rtcp header")
             .unwrap();
         assert_eq!(header, read_header);

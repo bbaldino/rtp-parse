@@ -28,9 +28,9 @@ impl PartialEq<&str> for RtcpByeReason {
     }
 }
 
-impl<B: BitBuf> ParselyRead<B, ()> for RtcpByeReason {
-    /// Note that this assumes it's been checked that there is data remaining in this buffer
-    fn read<T: ByteOrder>(buf: &mut B, _ctx: ()) -> ParselyResult<Self> {
+impl ParselyRead for RtcpByeReason {
+    type Ctx = ();
+    fn read<B: BitBuf, T: ByteOrder>(buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<Self> {
         let length_bytes = buf.get_u8().context("Reading reason length bytes")?;
         let mut data = vec![0; length_bytes as usize];
         buf.try_copy_to_slice_bytes(&mut data[..])
@@ -40,8 +40,11 @@ impl<B: BitBuf> ParselyRead<B, ()> for RtcpByeReason {
     }
 }
 
-impl<B: BitBufMut> ParselyWrite<B, ()> for RtcpByeReason {
-    fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: ()) -> ParselyResult<()> {
+impl_stateless_sync!(RtcpByeReason);
+
+impl ParselyWrite for RtcpByeReason {
+    type Ctx = ();
+    fn write<B: BitBufMut, T: ByteOrder>(&self, buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<()> {
         buf.put_u8(self.length_bytes() as u8)
             .context("Writing reason string length")?;
         buf.try_put_slice_bytes(self.0.as_bytes())
@@ -68,10 +71,7 @@ impl<B: BitBufMut> ParselyWrite<B, ()> for RtcpByeReason {
 #[parsely(alignment = 4)]
 pub struct RtcpByePacket {
     #[parsely_read(assign_from = "rtcp_header")]
-    // TODO: should we do a falliable conversion here when passing self.ssrcs.len()? Do we need to
-    // support sync_with expressions being falliable?  Maybe we can wrap it in such a way that it
-    // could abstract over an expression that might return T or Result<T>.
-    #[parsely_write(sync_with("self.payload_length_bytes()", "u5::new(self.ssrcs.len() as u8)"))]
+    #[parsely_write(sync_with("self.payload_length_bytes()", "self.ssrcs.len().try_into()"))]
     pub header: RtcpHeader,
     #[parsely_read(count = "header.report_count.into()")]
     pub ssrcs: Vec<u32>,
@@ -147,7 +147,8 @@ mod tests {
         // add reason bytes
         payload.extend(reason_bytes.collect::<Vec<u8>>());
         let mut bits = Bits::from_owner_bytes(payload);
-        let rtcp_bye = RtcpByePacket::read::<NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,)).unwrap();
+        let rtcp_bye =
+            RtcpByePacket::read::<_, NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,)).unwrap();
         assert!(rtcp_bye.ssrcs.contains(&1u32));
         assert!(rtcp_bye.ssrcs.contains(&2u32));
         assert_eq!(rtcp_bye.reason.unwrap(), reason_str);
@@ -163,7 +164,8 @@ mod tests {
             0x00, 0x00, 0x00, 0x02,
         ];
         let mut bits = Bits::from_owner_bytes(payload);
-        let rtcp_bye = RtcpByePacket::read::<NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,)).unwrap();
+        let rtcp_bye =
+            RtcpByePacket::read::<_, NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,)).unwrap();
         assert!(rtcp_bye.ssrcs.contains(&1u32));
         assert!(rtcp_bye.ssrcs.contains(&2u32));
         assert!(rtcp_bye.reason.is_none());
@@ -173,7 +175,7 @@ mod tests {
     fn test_read_missing_ssrc() {
         // Report count (source count) is 2 in header, but we'll just have 1 SSRC in the payload
         let mut bits = Bits::from_static_bytes(&[1, 2, 3, 4]);
-        let result = RtcpByePacket::read::<NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,));
+        let result = RtcpByePacket::read::<_, NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,));
         assert!(result.is_err());
     }
 
@@ -189,7 +191,7 @@ mod tests {
             0x02, 0xFF, 0xFF
         ];
         let mut bits = Bits::from_owner_bytes(payload);
-        let result = RtcpByePacket::read::<NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,));
+        let result = RtcpByePacket::read::<_, NetworkOrder>(&mut bits, (TEST_RTCP_HEADER,));
         assert!(result.is_err());
     }
 
@@ -211,7 +213,7 @@ mod tests {
         // 2 bytes of padding
         payload.extend([0x00, 0x00]);
         let mut buf = Bits::from_owner_bytes(payload);
-        let _rtcp_bye = RtcpByePacket::read::<NetworkOrder>(&mut buf, (TEST_RTCP_HEADER,))
+        let _rtcp_bye = RtcpByePacket::read::<_, NetworkOrder>(&mut buf, (TEST_RTCP_HEADER,))
             .expect("Successful read");
         // Make sure the buffer was fully consumed
         assert_eq!(buf.remaining_bytes(), 0);
@@ -242,18 +244,18 @@ mod tests {
         let mut buf_mut = BitsMut::new();
 
         rtcp_bye
-            .write::<NetworkOrder>(&mut buf_mut, ())
+            .write::<_, NetworkOrder>(&mut buf_mut, ())
             .expect("successful write");
 
         // Now read from the buffer and compare
         let mut buf = buf_mut.freeze();
         let read_rtcp_header =
-            RtcpHeader::read::<NetworkOrder>(&mut buf, ()).expect("successul read");
+            RtcpHeader::read::<_, NetworkOrder>(&mut buf, ()).expect("successul read");
         assert_eq!(read_rtcp_header, syncd_rtcp_header);
         let payload_length_bytes = read_rtcp_header.payload_length_bytes().unwrap();
         let mut bye_subbuf = (&mut buf).take_bytes(payload_length_bytes as usize);
         let read_rtcp_bye =
-            RtcpByePacket::read::<NetworkOrder>(&mut bye_subbuf, (read_rtcp_header,))
+            RtcpByePacket::read::<_, NetworkOrder>(&mut bye_subbuf, (read_rtcp_header,))
                 .expect("successful read");
 
         assert_eq!(rtcp_bye, read_rtcp_bye);
@@ -271,18 +273,18 @@ mod tests {
         let mut buf_mut = BitsMut::new();
 
         rtcp_bye
-            .write::<NetworkOrder>(&mut buf_mut, ())
+            .write::<_, NetworkOrder>(&mut buf_mut, ())
             .expect("successful write");
 
         // Now read from the buffer and compare
         let mut buf = buf_mut.freeze();
         let read_rtcp_header =
-            RtcpHeader::read::<NetworkOrder>(&mut buf, ()).expect("successul read");
+            RtcpHeader::read::<_, NetworkOrder>(&mut buf, ()).expect("successul read");
         assert_eq!(read_rtcp_header, syncd_rtcp_header);
         let payload_length_bytes = read_rtcp_header.payload_length_bytes().unwrap();
         let mut bye_subbuf = (&mut buf).take_bytes(payload_length_bytes as usize);
         let read_rtcp_bye =
-            RtcpByePacket::read::<NetworkOrder>(&mut bye_subbuf, (read_rtcp_header,))
+            RtcpByePacket::read::<_, NetworkOrder>(&mut bye_subbuf, (read_rtcp_header,))
                 .expect("successful read");
 
         assert_eq!(rtcp_bye, read_rtcp_bye);
@@ -299,7 +301,7 @@ mod tests {
         let mut buf_mut = BitsMut::new();
 
         rtcp_bye
-            .write::<NetworkOrder>(&mut buf_mut, ())
+            .write::<_, NetworkOrder>(&mut buf_mut, ())
             .expect("successful write");
 
         // Make sure we landed on a word boundary

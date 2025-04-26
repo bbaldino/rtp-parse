@@ -27,6 +27,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bits-io"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcbcd26fa709b7c9505effa80061a1a844173d235487d7a5ec742c3002020d3b"
+dependencies = [
+ "bitvec",
+ "bytes",
+ "funty",
+ "nsw-types",
+]
+
+[[package]]
 name = "bitvec"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -127,9 +139,9 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
 name = "nsw-types"
-version = "0.1.11"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebce55c42e15bdd5b42cf5256965359ffe0f7c4398eb1ce21d6828bd00868c03"
+checksum = "71b228ff512fa5af55f540d4ac3f4312f72667701679c9808c27c5b9bf64ef34"
 dependencies = [
  "num-traits",
 ]
@@ -145,12 +157,12 @@ dependencies = [
 
 [[package]]
 name = "parsely-impl"
-version = "0.1.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04d1d6d6f4e989f1ce6841bec02243cc2b67ac47b4a6c3be48c9cb89bf41261d"
+checksum = "55c8bb094eea8695236354c66b739501651a993566494893eb336152da76cfa4"
 dependencies = [
  "anyhow",
- "bits-io",
+ "bits-io 0.3.0",
  "darling",
  "paste",
  "proc-macro-crate",
@@ -161,9 +173,9 @@ dependencies = [
 
 [[package]]
 name = "parsely-macro"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbea8c339f23b9a500b910bb49c935134974b233b43545d9d54f5dcc247991ea"
+checksum = "defd2ecb5b0591a3a26d962c2ef51c632ec0ff4bb23e83a87d22ee06af92dd78"
 dependencies = [
  "parsely-impl",
  "proc-macro2",
@@ -173,9 +185,9 @@ dependencies = [
 
 [[package]]
 name = "parsely-rs"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68202975493c4e227c7fff49066290f9d9c6d84e2c1c7842a12fb0b32f8a2c8a"
+checksum = "6ea59d9c2e08b66c9cdfe0c881d3edb8d9aa60c37caef4e5fe83819185718212"
 dependencies = [
  "parsely-impl",
  "parsely-macro",
@@ -225,7 +237,7 @@ name = "rtp-parse"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bits-io",
+ "bits-io 0.4.0",
  "bitvec",
  "bytes",
  "parsely-rs",
