@@ -77,6 +77,19 @@ The first approach simplifies things quite a bit, I think, but the performance
 implications are unclear.  So I think some amount of investigation into both
 styles and some comparisons are needed.
 
+Another interesting aspect here: for RTCP, where we parse everything, the
+methods taking generic `BitBuf`/`BitBufMut` makes sense.  But for RTP I think
+there may be some advantages to specifically using `Bits`/`BitsMut`:
+
+- We get more copy-efficient operations on `Bits`/`BitsMut` (by way of using `Bytes`/`BytesMut`)
+
+This also makes me wonder if we should enforce any trait bounds on the
+ParselyRead/Write traits.  The auto-generated ones require BitBuf, but putting
+it in the trait itself prevents me from re-using that trait for RTP where I'd
+want to make the generic a `Bits` instance.  This could cause problems if you
+tried to call one from another, but that's probably best left up to the user
+anyway.
+
 ### Sub-buffers
 
 One goal I was really interested in was the concept of a "sub-buffer" where an exact-sized-slice of some kind could be taken and passed to a parsing method.  This could help ensure both that the parsing method didn't read too much data and also that it did consume all the data it was supposed to.  Unfortunately this concept doesn't work

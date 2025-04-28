@@ -1,4 +1,4 @@
-use parsely::*;
+use parsely_rs::*;
 
 ///
 /// https://tools.ietf.org/html/rfc3550#section-5.1
@@ -16,7 +16,6 @@ use parsely::*;
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// |              ...extensions (if present)...                    |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
 #[derive(Debug, ParselyRead)]
 pub struct RtpHeader {
     version: u2,

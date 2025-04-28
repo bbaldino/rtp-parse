@@ -9,28 +9,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcfed56ad506cb2c684a14971b8861fdc3baaaae314b9e5f9bb532cbe3ba7a4f"
 
 [[package]]
-name = "autocfg"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
-
-[[package]]
 name = "bits-io"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4360acdd981d32f0bbac44ddbce5ce5d713e288a22802c9a26f60d290256d426"
-dependencies = [
- "bitvec",
- "bytes",
- "funty",
- "nsw-types",
-]
-
-[[package]]
-name = "bits-io"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcbcd26fa709b7c9505effa80061a1a844173d235487d7a5ec742c3002020d3b"
+version = "0.5.2"
 dependencies = [
  "bitvec",
  "bytes",
@@ -142,27 +122,13 @@ name = "nsw-types"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71b228ff512fa5af55f540d4ac3f4312f72667701679c9808c27c5b9bf64ef34"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
-name = "num-traits"
-version = "0.2.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
-dependencies = [
- "autocfg",
-]
 
 [[package]]
 name = "parsely-impl"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55c8bb094eea8695236354c66b739501651a993566494893eb336152da76cfa4"
 dependencies = [
  "anyhow",
- "bits-io 0.3.0",
+ "bits-io",
  "darling",
  "paste",
  "proc-macro-crate",
@@ -174,8 +140,6 @@ dependencies = [
 [[package]]
 name = "parsely-macro"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "defd2ecb5b0591a3a26d962c2ef51c632ec0ff4bb23e83a87d22ee06af92dd78"
 dependencies = [
  "parsely-impl",
  "proc-macro2",
@@ -186,8 +150,6 @@ dependencies = [
 [[package]]
 name = "parsely-rs"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ea59d9c2e08b66c9cdfe0c881d3edb8d9aa60c37caef4e5fe83819185718212"
 dependencies = [
  "parsely-impl",
  "parsely-macro",
@@ -237,7 +199,7 @@ name = "rtp-parse"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bits-io 0.4.0",
+ "bits-io",
  "bitvec",
  "bytes",
  "parsely-rs",

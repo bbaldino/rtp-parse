@@ -35,7 +35,7 @@ use super::rtcp_header::RtcpHeader;
 #[parsely_read(required_context("header: RtcpHeader"))]
 pub struct RtcpSdesPacket {
     #[parsely_read(assign_from = "header")]
-    #[parsely_write(sync_with("self.payload_length_bytes()", "u5::new(self.chunks.len() as u8)"))]
+    #[parsely_write(sync_with("self.payload_length_bytes()", "self.chunks.len().try_into()"))]
     #[parsely(assertion = "|header: &RtcpHeader| header.packet_type == RtcpSdesPacket::PT")]
     pub header: RtcpHeader,
     #[parsely_read(count = "header.report_count.into()")]
