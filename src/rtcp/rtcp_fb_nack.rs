@@ -58,16 +58,13 @@ impl StateSync for RtcpFbNackPacket {
     }
 }
 
-impl ParselyRead for RtcpFbNackPacket {
+impl<B: BitBuf> ParselyRead<B> for RtcpFbNackPacket {
     type Ctx = (RtcpHeader, RtcpFbHeader);
-    fn read<B: BitBuf, T: ByteOrder>(
-        buf: &mut B,
-        (header, fb_header): Self::Ctx,
-    ) -> ParselyResult<Self> {
+    fn read<T: ByteOrder>(buf: &mut B, (header, fb_header): Self::Ctx) -> ParselyResult<Self> {
         let mut missing_seq_nums = BTreeSet::new();
         let mut nack_block_num = 1;
         while buf.remaining_bytes() >= NackBlock::SIZE_BYTES {
-            let mut nack_block = NackBlock::read::<_, T>(buf, ())
+            let mut nack_block = NackBlock::read::<T>(buf, ())
                 .with_context(|| format!("Nack block {nack_block_num}"))?;
             missing_seq_nums.append(&mut nack_block.missing_seq_nums);
             nack_block_num += 1;
@@ -80,11 +77,11 @@ impl ParselyRead for RtcpFbNackPacket {
     }
 }
 
-impl ParselyWrite for RtcpFbNackPacket {
+impl<B: BitBufMut> ParselyWrite<B> for RtcpFbNackPacket {
     type Ctx = ();
-    fn write<B: BitBufMut, T: ByteOrder>(&self, buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<()> {
-        self.header.write::<_, T>(buf, ()).context("header")?;
-        self.fb_header.write::<_, T>(buf, ()).context("fb header")?;
+    fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<()> {
+        self.header.write::<T>(buf, ()).context("header")?;
+        self.fb_header.write::<T>(buf, ()).context("fb header")?;
         for (i, chunk) in self
             .missing_seq_nums
             .chunk_by_max_difference(16)
@@ -98,7 +95,7 @@ impl ParselyWrite for RtcpFbNackPacket {
                 missing_seq_nums: chunk,
             };
             nack_block
-                .write::<B, T>(buf, ())
+                .write::<T>(buf, ())
                 .with_context(|| format!("Writing nack block {i}"))?;
         }
 
@@ -119,9 +116,9 @@ impl NackBlock {
     }
 }
 
-impl ParselyRead for NackBlock {
+impl<B: BitBuf> ParselyRead<B> for NackBlock {
     type Ctx = ();
-    fn read<B: BitBuf, T: ByteOrder>(buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<Self> {
+    fn read<T: ByteOrder>(buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<Self> {
         let packet_id = buf.get_u16::<NetworkOrder>().context("packet id")?;
         let blp = buf.get_u16::<NetworkOrder>().context("blp")?;
 
@@ -138,9 +135,9 @@ impl ParselyRead for NackBlock {
 
 impl_stateless_sync!(NackBlock);
 
-impl ParselyWrite for NackBlock {
+impl<B: BitBufMut> ParselyWrite<B> for NackBlock {
     type Ctx = ();
-    fn write<B: BitBufMut, T: ByteOrder>(&self, buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<()> {
+    fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<()> {
         let packet_id = self.missing_seq_nums.first().ok_or(anyhow!(
             "NackBlock must contain at least one sequence number"
         ))?;
@@ -197,7 +194,7 @@ mod test {
     fn test_read_nack_block() {
         // Missing seq nums 10, 11, 16, 18, 22, 24, 26
         let mut bits = Bits::from_static_bytes(&[0x00, 0x0A, 0xA8, 0xA1]);
-        let nack_block = NackBlock::read::<_, NetworkOrder>(&mut bits, ()).unwrap();
+        let nack_block = NackBlock::read::<NetworkOrder>(&mut bits, ()).unwrap();
         assert_eq!(
             nack_block.missing_seq_nums,
             BTreeSet::from([10, 11, 16, 18, 22, 24, 26]),
@@ -217,12 +214,10 @@ mod test {
         nack_block.add_missing_seq_num(26);
 
         let mut bits_mut = BitsMut::new();
-        nack_block
-            .write::<_, NetworkOrder>(&mut bits_mut, ())
-            .unwrap();
+        nack_block.write::<NetworkOrder>(&mut bits_mut, ()).unwrap();
 
         let mut bits = bits_mut.freeze();
-        let read_nack_block = NackBlock::read::<_, NetworkOrder>(&mut bits, ()).unwrap();
+        let read_nack_block = NackBlock::read::<NetworkOrder>(&mut bits, ()).unwrap();
         assert_eq!(read_nack_block, nack_block);
     }
 
@@ -250,7 +245,7 @@ mod test {
         ];
         let mut bits = Bits::from_owner_bytes(nack_payload);
         let nack_packet =
-            RtcpFbNackPacket::read::<_, NetworkOrder>(&mut bits, (rtcp_header, rtcp_fb_header))
+            RtcpFbNackPacket::read::<NetworkOrder>(&mut bits, (rtcp_header, rtcp_fb_header))
                 .unwrap();
         assert_eq!(
             nack_packet.missing_seq_nums,
@@ -309,13 +304,13 @@ mod test {
         let mut bits_mut = BitsMut::new();
 
         rtcp_fb_nack
-            .write::<_, NetworkOrder>(&mut bits_mut, ())
+            .write::<NetworkOrder>(&mut bits_mut, ())
             .unwrap();
         let mut bits = bits_mut.freeze();
-        let header = RtcpHeader::read::<_, NetworkOrder>(&mut bits, ()).unwrap();
-        let fb_header = RtcpFbHeader::read::<_, NetworkOrder>(&mut bits, ()).unwrap();
+        let header = RtcpHeader::read::<NetworkOrder>(&mut bits, ()).unwrap();
+        let fb_header = RtcpFbHeader::read::<NetworkOrder>(&mut bits, ()).unwrap();
         let read_rtcp_fb_nack =
-            RtcpFbNackPacket::read::<_, NetworkOrder>(&mut bits, (header, fb_header)).unwrap();
+            RtcpFbNackPacket::read::<NetworkOrder>(&mut bits, (header, fb_header)).unwrap();
         assert_eq!(read_rtcp_fb_nack, rtcp_fb_nack);
     }
 }

@@ -10,7 +10,19 @@ checksum = "dcfed56ad506cb2c684a14971b8861fdc3baaaae314b9e5f9bb532cbe3ba7a4f"
 
 [[package]]
 name = "bits-io"
-version = "0.5.2"
+version = "0.5.3"
+dependencies = [
+ "bitvec",
+ "bytes",
+ "funty",
+ "nsw-types",
+]
+
+[[package]]
+name = "bits-io"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "334d5023bf30d7edb7798b4dbbef2e2d3c121ecd885445cb1f6b0dbe879ab5e8"
 dependencies = [
  "bitvec",
  "bytes",
@@ -119,16 +131,19 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
 name = "nsw-types"
-version = "0.1.12"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71b228ff512fa5af55f540d4ac3f4312f72667701679c9808c27c5b9bf64ef34"
+checksum = "1268a985a9c927a01dc269ca861795705ead85b2d8a1124d5cda7878aaa7b787"
+dependencies = [
+ "bitvec",
+]
 
 [[package]]
 name = "parsely-impl"
 version = "0.3.0"
 dependencies = [
  "anyhow",
- "bits-io",
+ "bits-io 0.5.4",
  "darling",
  "paste",
  "proc-macro-crate",
@@ -199,7 +214,7 @@ name = "rtp-parse"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bits-io",
+ "bits-io 0.5.3",
  "bitvec",
  "bytes",
  "parsely-rs",

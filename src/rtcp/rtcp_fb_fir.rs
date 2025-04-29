@@ -101,7 +101,7 @@ mod tests {
 
         let mut buf = Bits::from_owner_bytes(data);
 
-        let fci = RtcpFbFirFci::read::<_, NetworkOrder>(&mut buf, ()).expect("successful read");
+        let fci = RtcpFbFirFci::read::<NetworkOrder>(&mut buf, ()).expect("successful read");
         assert_eq!(fci.ssrc, 42);
         assert_eq!(fci.seq_num, 1);
     }
@@ -111,11 +111,10 @@ mod tests {
         let fci = RtcpFbFirFci::new(42, 1);
         let mut buf_mut = BitsMut::new();
 
-        fci.write::<_, NetworkOrder>(&mut buf_mut, ())
+        fci.write::<NetworkOrder>(&mut buf_mut, ())
             .expect("successful write");
         let mut buf = buf_mut.freeze();
-        let read_fci =
-            RtcpFbFirFci::read::<_, NetworkOrder>(&mut buf, ()).expect("successful read");
+        let read_fci = RtcpFbFirFci::read::<NetworkOrder>(&mut buf, ()).expect("successful read");
         assert_eq!(fci, read_fci);
     }
 
@@ -139,7 +138,7 @@ mod tests {
         };
         let fb_header = RtcpFbHeader::new(42, 0);
 
-        let fb_fir_packet = RtcpFbFirPacket::read::<_, NetworkOrder>(&mut buf, (header, fb_header))
+        let fb_fir_packet = RtcpFbFirPacket::read::<NetworkOrder>(&mut buf, (header, fb_header))
             .expect("successful read");
         assert_eq!(buf.remaining_bytes(), 0);
         assert_eq!(fb_fir_packet.fcis.len(), 1);
@@ -174,7 +173,7 @@ mod tests {
         };
         let fb_header = RtcpFbHeader::new(42, 0);
 
-        let fb_fir_packet = RtcpFbFirPacket::read::<_, NetworkOrder>(&mut buf, (header, fb_header))
+        let fb_fir_packet = RtcpFbFirPacket::read::<NetworkOrder>(&mut buf, (header, fb_header))
             .expect("successful read");
         assert_eq!(buf.remaining_bytes(), 0);
         assert_eq!(fb_fir_packet.fcis.len(), 2);
@@ -214,16 +213,13 @@ mod tests {
         rtcp_fb_fir.sync(()).unwrap();
         let mut buf_mut = BitsMut::new();
 
-        rtcp_fb_fir
-            .write::<_, NetworkOrder>(&mut buf_mut, ())
-            .unwrap();
+        rtcp_fb_fir.write::<NetworkOrder>(&mut buf_mut, ()).unwrap();
         let mut buf = buf_mut.freeze();
 
-        let rtcp_header = RtcpHeader::read::<_, NetworkOrder>(&mut buf, ()).unwrap();
-        let rtcp_fb_header = RtcpFbHeader::read::<_, NetworkOrder>(&mut buf, ()).unwrap();
+        let rtcp_header = RtcpHeader::read::<NetworkOrder>(&mut buf, ()).unwrap();
+        let rtcp_fb_header = RtcpFbHeader::read::<NetworkOrder>(&mut buf, ()).unwrap();
         let read_rtcp_fb_fir =
-            RtcpFbFirPacket::read::<_, NetworkOrder>(&mut buf, (rtcp_header, rtcp_fb_header))
-                .unwrap();
+            RtcpFbFirPacket::read::<NetworkOrder>(&mut buf, (rtcp_header, rtcp_fb_header)).unwrap();
         assert_eq!(rtcp_fb_fir, read_rtcp_fb_fir);
     }
 }
