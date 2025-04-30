@@ -90,6 +90,35 @@ want to make the generic a `Bits` instance.  This could cause problems if you
 tried to call one from another, but that's probably best left up to the user
 anyway.
 
+I'm also wondering how best to model the RTP packets in terms of what type they
+hold: if they hold a `Bits` then we don't have a good way to make changes.
+Some use cases:
+
+#### SRTP
+
+We'll need to strip the auth tag and then decrypt the payload.  Stripping the
+auth tag is easy, but for the decryption we could either hold the data as
+`BitsMut` and decrypt the it in place or do it in a new `Bits` instance and
+then chain that?
+
+#### Modifying the RTP header
+
+If we use `Bits`, we could chunk the buffer into `Bits` instances for each
+individual field and then replace/chain the ones that need to be modified.  Or
+we could use a `BitsMut` and modify it in place.
+
+#### The fan out
+
+Another question is how to optimize the fan-out that will eventually take
+place.  The fields that need to get changed post-fan-out are, at least:
+
+- the payload (both to encrypt and to add tag)
+- ssrc, seqnum are also likely
+
+If we're modifying the payload and have to copy that, maybe optimizing for the
+rest is noise anyway?  What if we were using quic and not encrypting payload
+there, does that change things?
+
 ### Sub-buffers
 
 One goal I was really interested in was the concept of a "sub-buffer" where an exact-sized-slice of some kind could be taken and passed to a parsing method.  This could help ensure both that the parsing method didn't read too much data and also that it did consume all the data it was supposed to.  Unfortunately this concept doesn't work

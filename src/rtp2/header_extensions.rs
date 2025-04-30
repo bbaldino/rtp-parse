@@ -15,11 +15,13 @@ use parsely_rs::*;
 ///    Each extension element MUST start with a byte containing an ID and a
 ///    length:
 ///
+///    ```text
 ///        0
 ///        0 1 2 3 4 5 6 7
 ///       +-+-+-+-+-+-+-+-+
 ///       |  ID   |  len  |
 ///       +-+-+-+-+-+-+-+-+
+///    ```
 ///
 ///    The 4-bit ID is the local identifier of this element in the range
 ///    1-14 inclusive.  In the signaling section, this is referred to as the
@@ -39,10 +41,11 @@ use parsely_rs::*;
 ///    16 bytes.  (This permits carriage of 16-byte values, which is a
 ///    common length of labels and identifiers, while losing the possibility
 ///    of zero-length values, which would often be padded anyway.)
-// TODO: I remember how costly parsing header extensions was at volume, so keeping this a
-// "lens-style" view of the data rather than parsing the individual field may make sense?
 #[derive(Debug)]
-pub struct OneByteHeaderExtension(Bits);
+pub struct OneByteHeaderExtension {
+    id: u4,
+    data: Bits,
+}
 
 impl OneByteHeaderExtension {
     pub const TYPE: u16 = 0xBEDE;
@@ -51,52 +54,68 @@ impl OneByteHeaderExtension {
         ext_type == Self::TYPE
     }
 
-    pub fn id(&self) -> u8 {
-        // Header extensions have to be byte aligned
-        assert!(self.0.byte_aligned());
-        // TODO: there's no great way to do this with a good bits API, currently.  `get_u4` will
-        // advance the buffer, which we don't want.  If we had a way to create the nsw-types from a
-        // `BitSlice` (like how sw-integers can be created "from_be_bytes") then that would be
-        // useful here.  We could do something like:
-        // u4::from_bitslice(self.0[0..4])
-        (self.0.chunk_bytes()[0] & 0xF0) >> 4
+    pub fn id(&self) -> u4 {
+        self.id
     }
 
-    // TODO: i think we just want the raw bytes here, not a Bits instance?
     pub fn data(&self) -> &[u8] {
-        &self.0.chunk_bytes()[1..]
+        self.data.chunk_bytes()
     }
 }
 
-pub fn read_one_byte_header_extension(buf: &mut Bits) -> ParselyResult<OneByteHeaderExtension> {
-    let id = (buf.chunk_bytes()[0] & 0xF0) >> 4;
+impl<B: BitBuf> ParselyRead<B> for OneByteHeaderExtension {
+    type Ctx = ();
 
-    // Get the length of the entire extension (including the id/len byte)
-    let length_bytes = match id {
-        // A 0 id means we've hit the end of the extensions
-        0 => 1,
-        // We add '2' here to get the length of the entire extension (id/len byte + data):
-        // 1 is for the id/len byte which we only 'peeked' at above
-        // 1 is for the fact that, in one-byte extensions, the length field is the number of bytes
-        //   minus 1
-        _ => ((buf.chunk_bytes()[0] & 0xF) + 2) as usize,
-    };
+    fn read<T: ByteOrder>(buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<Self> {
+        let id = buf.get_u4().context("id")?;
 
-    if buf.remaining_bytes() < length_bytes {
-        bail!(
-            "Header extension length was {length_bytes} but buffer only has {} bytes remaining",
-            buf.remaining_bytes()
-        );
+        // Get the length of the entire extension (including the id/len byte)
+        let data_length_bytes = match id {
+            // A 0 id means we've hit the end of the extensions
+            i if i == 0 => {
+                // Consume the rest of this byte
+                let _ = buf.get_u4();
+                0
+            }
+            // 1 is for the fact that, in one-byte extensions, the length field is the number of
+            // bytes minus 1
+            _ => {
+                let length: usize = buf.get_u4().context("length")?.into();
+                // In one-byte header extensions, the length field value is the length in bytes
+                // minus one, so add one here to get the actual data length in bytes
+                length + 1
+            }
+        };
+
+        if buf.remaining_bytes() < data_length_bytes {
+            bail!(
+                "Header extension length was {data_length_bytes} but buffer only has {} bytes remaining",
+                buf.remaining_bytes()
+            );
+        }
+        let data = Bits::copy_from_bytes(&buf.chunk_bytes()[..data_length_bytes]);
+        buf.advance_bytes(data_length_bytes);
+        Ok(OneByteHeaderExtension { id, data })
     }
-    println!("length bytes = {length_bytes}");
-    println!("buf = {buf:?}");
-    let he_buffer = buf.split_to_bytes(length_bytes);
-    println!("he buff: {he_buffer:?}");
-    println!("he remaining: {}", he_buffer.remaining_bytes());
-    Ok(OneByteHeaderExtension(he_buffer))
 }
 
-// https://datatracker.ietf.org/doc/html/rfc8285#section-4.3
+impl<B: BitBufMut> ParselyWrite<B> for OneByteHeaderExtension {
+    type Ctx = ();
+
+    fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<()> {
+        buf.put_u4(self.id).context("Writing field 'id'")?;
+        let data_length_bytes = self.data.len_bytes();
+        let length_field = u4::try_from(data_length_bytes - 1).context("fitting length in u4")?;
+        buf.put_u4(length_field).context("Writing field 'length'")?;
+        buf.try_put_slice_bytes(self.data())
+            .context("Writing field 'data'")?;
+
+        Ok(())
+    }
+}
+
+impl_stateless_sync!(OneByteHeaderExtension);
+
 // Two Byte Header
 //
 // In the two-byte header form, the 16-bit value defined by the RTP
@@ -141,7 +160,10 @@ pub fn read_one_byte_header_extension(buf: &mut Bits) -> ParselyResult<OneByteHe
 //    including the ID and length fields.  The value zero (0) indicates
 //    that there is no subsequent data.
 #[derive(Debug)]
-pub struct TwoByteHeaderExtension(Bits);
+pub struct TwoByteHeaderExtension {
+    id: u8,
+    data: Bits,
+}
 
 impl TwoByteHeaderExtension {
     const TYPE_MASK: u16 = 0xFFF0;
@@ -152,33 +174,52 @@ impl TwoByteHeaderExtension {
     }
 
     pub fn id(&self) -> u8 {
-        self.0.chunk_bytes()[0]
+        self.id
     }
 
     pub fn data(&self) -> &[u8] {
-        &self.0.chunk_bytes()[2..]
+        self.data.chunk_bytes()
     }
 }
 
-/// [`buf`] should start at the beginning of the header extension (the id)
-pub fn read_two_byte_header_extension(buf: &mut Bits) -> ParselyResult<TwoByteHeaderExtension> {
-    let id = buf.chunk_bytes()[0];
-    let data_length_bytes = match id {
-        0 => 0,
-        // Add 2 to include the id and length fields
-        _ => buf.chunk_bytes()[1],
-    } as usize;
-    if buf.remaining_bytes() < data_length_bytes + 1 {
-        bail!(
-            "Header extension length was {data_length_bytes} but buffer only has {} bytes remaining",
-            buf.remaining_bytes()
-        );
+impl<B: BitBuf> ParselyRead<B> for TwoByteHeaderExtension {
+    type Ctx = ();
+
+    /// [`buf`] should start at the beginning of the header extension (the id)
+    fn read<T: ByteOrder>(buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<Self> {
+        let id = buf.get_u8().context("id")?;
+        let data_length_bytes = match id {
+            0 => 0,
+            _ => buf.get_u8().context("length")?,
+        } as usize;
+        if buf.remaining_bytes() < data_length_bytes {
+            bail!(
+                "Header extension length was {data_length_bytes} but buffer only has {} bytes remaining",
+                buf.remaining_bytes()
+            );
+        }
+        let data = Bits::copy_from_bytes(&buf.chunk_bytes()[..data_length_bytes]);
+        buf.advance_bytes(data_length_bytes);
+        Ok(TwoByteHeaderExtension { id, data })
     }
-    // The length field is in the second byte, and the '2' is to account for the id and length
-    // field bytes before the actul data
-    let he = buf.split_to_bytes(2 + data_length_bytes);
-    Ok(TwoByteHeaderExtension(he))
 }
+
+impl<B: BitBufMut> ParselyWrite<B> for TwoByteHeaderExtension {
+    type Ctx = ();
+
+    fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<()> {
+        buf.put_u8(self.id()).context("Writing field 'id'")?;
+        let data_length_bytes = self.data().len();
+        buf.put_u8(data_length_bytes as u8)
+            .context("Writing field 'length'")?;
+        buf.try_put_slice_bytes(self.data())
+            .context("Writing field 'data'")?;
+
+        Ok(())
+    }
+}
+
+impl_stateless_sync!(TwoByteHeaderExtension);
 
 #[derive(Debug)]
 pub enum SomeHeaderExtension {
@@ -189,7 +230,7 @@ pub enum SomeHeaderExtension {
 impl SomeHeaderExtension {
     pub fn id(&self) -> u8 {
         match self {
-            SomeHeaderExtension::OneByteHeaderExtension(e) => e.id(),
+            SomeHeaderExtension::OneByteHeaderExtension(e) => e.id().into(),
             SomeHeaderExtension::TwoByteHeaderExtension(e) => e.id(),
         }
     }
@@ -201,6 +242,19 @@ impl SomeHeaderExtension {
         }
     }
 }
+
+impl<B: BitBufMut> ParselyWrite<B> for SomeHeaderExtension {
+    type Ctx = ();
+
+    fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<()> {
+        match self {
+            SomeHeaderExtension::OneByteHeaderExtension(he) => he.write::<T>(buf, ()),
+            SomeHeaderExtension::TwoByteHeaderExtension(he) => he.write::<T>(buf, ()),
+        }
+    }
+}
+
+impl_stateless_sync!(SomeHeaderExtension);
 
 pub struct HeaderExtensions(HashMap<u8, SomeHeaderExtension>);
 
@@ -259,58 +313,79 @@ impl<'a> IntoIterator for &'a HeaderExtensions {
 /// the beginning of the header extensions block. `extmap_allow_mixed` denotes whether or not
 /// mixing one- and two-byte header extensions should be allowed.
 // TODO: I wanted to avoid having to pass 'extmap-allow-mixed' here, but an ID of 15 with it
-// disabled means parsing should stop immediately, so maybe we do need to pass it.
-pub fn read_header_extensions(buf: &mut Bits) -> ParselyResult<HeaderExtensions> {
-    let mut header_extensions = HashMap::new();
+// disabled means parsing should stop immediately, so maybe we do need to pass it.  We could pass
+// it as context?
+impl<B: BitBuf> ParselyRead<B> for HeaderExtensions {
+    type Ctx = ();
 
-    let ext_type = buf
-        .get_u16::<NetworkOrder>()
-        .context("Reading header extensions profile")?;
-    let ext_length = buf
-        .get_u16::<NetworkOrder>()
-        .context("Reading header extensions length")?;
+    fn read<T: ByteOrder>(buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<Self> {
+        let mut header_extensions = HashMap::new();
 
-    // 'ext_length' describes the length in 4-byte words
-    let ext_length_bytes = (ext_length * 4) as usize;
-    let current_bytes_remaining = buf.remaining_bytes();
+        let ext_type = buf
+            .get_u16::<NetworkOrder>()
+            .context("Reading header extensions profile")?;
+        let ext_length = buf
+            .get_u16::<NetworkOrder>()
+            .context("Reading header extensions length")?;
 
-    // Using `buf.take_bytes(ext_length_bytes)` would be a lot cleaner here, but then we lose the
-    // `Bits` instance and downstream functions would have to operate on `BitBuf` instead of `Bits`
-    // directly.  We want those downstream types to be able to save off the data without copying,
-    // so do this to keep things using `Bits` directly.
-    // TODO: one downside though is that this check won't prevent an individual extension parsing
-    // from going 'past' the limit as long as it starts before.
-    while buf.remaining_bytes() > current_bytes_remaining - ext_length_bytes {
-        println!("Length of extensions: {ext_length_bytes} bytes.  Starting bytes remaining: {current_bytes_remaining}, current bytes remaining: {}", buf.remaining_bytes());
-        let extension = if OneByteHeaderExtension::type_matches(ext_type) {
-            // Both one- and two-byte extensions may be present
-            // TODO: would be nice to clean this up.  If we had as_uXX methods for BitSlice that'd
-            // probably feel better
-            let id = &buf.chunk_bytes()[0] & 0xF0;
-            if id == 0xF0 {
-                // This was a 'fake' ID header to indicate that this is a 2-byte extension mixed in
-                // with one-byte extensions.  Swallow the first byte to get to the real 2-byte
-                // extension ID.
-                let _ = buf.get_u8();
-                let he = read_two_byte_header_extension(buf)?;
+        // 'ext_length' describes the length in 4-byte words
+        let ext_length_bytes = (ext_length * 4) as usize;
+        let mut extensions_buf = buf.take_bytes(ext_length_bytes);
+
+        while extensions_buf.has_remaining_bytes() {
+            let extension = if OneByteHeaderExtension::type_matches(ext_type) {
+                // Peek at the id so we can tell if this is a two-byte extension nested amongst
+                // one-byte extensions or not
+                let id = (&extensions_buf.chunk_bits()[..4]).as_u4();
+                if id == 0xF {
+                    // This was a 'fake' ID header to indicate that this is a 2-byte extension mixed
+                    // in with one-byte extensions.  Swallow the first byte to
+                    // get to the real 2-byte extension ID.
+                    let _ = extensions_buf.get_u8();
+                    let he = TwoByteHeaderExtension::read::<T>(&mut extensions_buf, ())
+                        .context("One-byte header extension")?;
+                    SomeHeaderExtension::TwoByteHeaderExtension(he)
+                } else {
+                    let he = OneByteHeaderExtension::read::<T>(&mut extensions_buf, ())
+                        .context("One-byte header extension")?;
+                    SomeHeaderExtension::OneByteHeaderExtension(he)
+                }
+            } else if TwoByteHeaderExtension::type_matches(ext_type) {
+                let he = TwoByteHeaderExtension::read::<T>(&mut extensions_buf, ())
+                    .context("One-byte header extension")?;
                 SomeHeaderExtension::TwoByteHeaderExtension(he)
             } else {
-                let he = read_one_byte_header_extension(buf)?;
-                SomeHeaderExtension::OneByteHeaderExtension(he)
+                bail!("Encountered invalid header extension block type: {ext_type:x}");
+            };
+            if extension.id() != 0 {
+                header_extensions.insert(extension.id(), extension);
             }
-        } else if TwoByteHeaderExtension::type_matches(ext_type) {
-            let he = read_two_byte_header_extension(buf)?;
-            SomeHeaderExtension::TwoByteHeaderExtension(he)
-        } else {
-            bail!("Encountered invalid header extension block type: {ext_type:x}");
-        };
-        if extension.id() != 0 {
-            header_extensions.insert(extension.id(), extension);
         }
-    }
 
-    Ok(HeaderExtensions(header_extensions))
+        Ok(HeaderExtensions(header_extensions))
+    }
 }
+
+impl<B: BitBufMut> ParselyWrite<B> for HeaderExtensions {
+    type Ctx = ();
+
+    fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<()> {
+        let len_start = buf.remaining_mut_bytes();
+        self.0
+            .values()
+            .map(|he| he.write::<T>(buf, ()))
+            .collect::<ParselyResult<Vec<_>>>()
+            .context("Writing header extensions")?;
+
+        while (len_start - buf.remaining_mut_bytes()) % 4 != 0 {
+            buf.put_u8(0).context("Padding")?;
+        }
+
+        Ok(())
+    }
+}
+
+impl_stateless_sync!(HeaderExtensions);
 
 #[cfg(test)]
 mod tests {
@@ -323,7 +398,7 @@ mod tests {
             0x10, 0xFF, 0x00, 0x00
         ]);
 
-        let he = read_one_byte_header_extension(&mut bits).unwrap();
+        let he = OneByteHeaderExtension::read::<NetworkOrder>(&mut bits, ()).unwrap();
         assert_eq!(he.id(), 1);
         assert_eq!(he.data(), &[0xFF]);
     }
@@ -334,7 +409,7 @@ mod tests {
         let mut bits = Bits::from_static_bytes(&[
             0x01, 0x01, 0xFF, 0x00, 0x00
         ]);
-        let he = read_two_byte_header_extension(&mut bits).unwrap();
+        let he = TwoByteHeaderExtension::read::<NetworkOrder>(&mut bits, ()).unwrap();
         assert_eq!(he.id(), 1);
         assert_eq!(he.data(), &[0xFF]);
     }
@@ -348,7 +423,7 @@ mod tests {
             0x21, 0xDE, 0xAD, 0x00
         ]);
 
-        let exts = read_header_extensions(&mut bits).unwrap();
+        let exts = HeaderExtensions::read::<NetworkOrder>(&mut bits, ()).unwrap();
         assert_eq!(exts.len(), 2);
         let ext1 = exts.get_by_id(1).unwrap();
         assert_eq!(ext1.data(), &[0xFF]);
@@ -366,7 +441,7 @@ mod tests {
             0xBE, 0xEF, 0x04, 0x01,
             0x42, 0x00, 0x00, 0x00,
         ]);
-        let exts = read_header_extensions(&mut bits).unwrap();
+        let exts = HeaderExtensions::read::<NetworkOrder>(&mut bits, ()).unwrap();
         assert_eq!(exts.len(), 2);
         let ext7 = exts.get_by_id(7).unwrap();
         assert_eq!(ext7.data(), &[0xDE, 0xAD, 0xBE, 0xEF]);
@@ -387,7 +462,7 @@ mod tests {
             0xAD, 0xBE, 0xEF, 0xF0,
             0x04, 0x01, 0x42, 0x00, 
         ]);
-        let exts = read_header_extensions(&mut bits).unwrap();
+        let exts = HeaderExtensions::read::<NetworkOrder>(&mut bits, ()).unwrap();
         assert_eq!(exts.len(), 3);
         let ext = exts.get_by_id(1).unwrap();
         assert_eq!(ext.data(), &[0xFF]);
