@@ -12,13 +12,14 @@ use super::{
     rtcp_header::RtcpHeader,
     rtcp_rr::RtcpRrPacket,
     rtcp_sdes::RtcpSdesPacket,
+    rtcp_sr::RtcpSrPacket,
 };
 
 #[derive(Debug)]
 pub enum SomeRtcpPacket {
     CompoundRtcpPacket(Vec<SomeRtcpPacket>),
     RtcpByePacket(RtcpByePacket),
-    // RtcpSrPacket(RtcpSrPacket),
+    RtcpSrPacket(RtcpSrPacket),
     RtcpRrPacket(RtcpRrPacket),
     RtcpSdesPacket(RtcpSdesPacket),
     RtcpFbNackPacket(RtcpFbNackPacket),
@@ -73,6 +74,9 @@ pub fn read_single_rtcp_packet<T: ByteOrder, B: BitBuf>(
         )),
         RtcpRrPacket::PT => Ok(SomeRtcpPacket::RtcpRrPacket(
             RtcpRrPacket::read::<T>(&mut payload_buffer, (header,)).context("rtcp rr")?,
+        )),
+        RtcpSrPacket::PT => Ok(SomeRtcpPacket::RtcpSrPacket(
+            RtcpSrPacket::read::<T>(&mut payload_buffer, (header,)).context("rtcp sr")?,
         )),
         RtcpFbPsPacket::PT | RtcpFbTlPacket::PT => {
             let fb_header =

@@ -36,7 +36,7 @@ use parsely_rs::*;
 ///        +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
 ///        |                  profile-specific extensions                  |
 ///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[derive(Debug, ParselyRead, ParselyWrite)]
+#[derive(Debug, PartialEq, Eq, ParselyRead, ParselyWrite)]
 pub struct RtcpReportBlock {
     pub ssrc: u32,
     pub fraction_lost: u8,

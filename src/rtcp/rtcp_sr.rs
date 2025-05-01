@@ -1,19 +1,5 @@
+use parsely_rs::*;
 use std::fmt::Debug;
-
-use anyhow::{Context, Result};
-use bit_cursor::{
-    bit_read_exts::BitReadExts, bit_write::BitWrite, bit_write_exts::BitWriteExts,
-    byte_order::NetworkOrder,
-};
-
-use crate::{
-    rtcp::{
-        rtcp_header::write_rtcp_header,
-        rtcp_report_block::{read_rtcp_report_block, write_rtcp_report_block},
-        rtcp_sender_info::{read_rtcp_sender_info, write_rtcp_sender_info},
-    },
-    BitBuf,
-};
 
 use super::{
     rtcp_header::RtcpHeader, rtcp_report_block::RtcpReportBlock, rtcp_sender_info::RtcpSenderInfo,
@@ -55,47 +41,25 @@ use super::{
 ///        +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
 ///        |                  profile-specific extensions                  |
 ///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, ParselyRead, ParselyWrite)]
+#[parsely_read(required_context("rtcp_header: RtcpHeader"))]
 pub struct RtcpSrPacket {
+    #[parsely_read(assign_from = "rtcp_header")]
+    #[parsely_write(sync_with(
+        "self.payload_length_bytes()",
+        "self.report_blocks.len().try_into()"
+    ))]
     pub header: RtcpHeader,
     pub sender_ssrc: u32,
     pub sender_info: RtcpSenderInfo,
+    #[parsely_read(count = "header.report_count.into()")]
     pub report_blocks: Vec<RtcpReportBlock>,
 }
 
 impl RtcpSrPacket {
     pub const PT: u8 = 200;
-}
 
-pub fn read_rtcp_sr<B: BitBuf>(buf: &mut B, header: RtcpHeader) -> Result<RtcpSrPacket> {
-    let sender_ssrc = buf.read_u32::<NetworkOrder>().context("sender ssrc")?;
-    let sender_info = read_rtcp_sender_info(buf).context("sender info")?;
-    let report_blocks = (0u32..header.report_count.into())
-        .map(|i| read_rtcp_report_block(buf).with_context(|| format!("report block {i}")))
-        .collect::<Result<Vec<RtcpReportBlock>>>()
-        .context("report blocks")?;
-
-    Ok(RtcpSrPacket {
-        header,
-        sender_ssrc,
-        sender_info,
-        report_blocks,
-    })
-}
-
-pub fn write_rtcp_sr<W: BitWrite>(buf: &mut W, packet: &RtcpSrPacket) -> Result<()> {
-    write_rtcp_header(buf, &packet.header).context("header")?;
-    buf.write_u32::<NetworkOrder>(packet.sender_ssrc)
-        .context("sender ssrc")?;
-    write_rtcp_sender_info(buf, &packet.sender_info).context("sender info")?;
-    packet
-        .report_blocks
-        .iter()
-        .enumerate()
-        .map(|(i, rb)| {
-            write_rtcp_report_block(buf, rb).with_context(|| format!("report block {i}"))
-        })
-        .collect::<Result<Vec<()>>>()
-        .context("report blocks")?;
-    todo!()
+    pub fn payload_length_bytes(&self) -> u16 {
+        (RtcpSenderInfo::SIZE_BYTES + self.report_blocks.len() * RtcpReportBlock::SIZE_BYTES) as u16
+    }
 }
