@@ -64,6 +64,7 @@ impl<B: BitBuf> ParselyRead<B> for RtcpFbTccPacket {
     type Ctx = (RtcpHeader, RtcpFbHeader);
 
     fn read<T: ByteOrder>(buf: &mut B, (header, fb_header): Self::Ctx) -> ParselyResult<Self> {
+        let bytes_remaining_start = buf.remaining_bytes();
         let base_seq_num = buf.get_u16::<T>().context("Reading field 'base_seq_num'")?;
         let packet_status_count = buf
             .get_u16::<T>()
@@ -114,6 +115,9 @@ impl<B: BitBuf> ParselyRead<B> for RtcpFbTccPacket {
                 }
                 curr_seq_num = curr_seq_num.wrapping_add(1);
             }
+        }
+        while (bytes_remaining_start - buf.remaining_bytes()) % 4 != 0 {
+            let _ = buf.get_u8().context("padding")?;
         }
         Ok(RtcpFbTccPacket {
             header,
