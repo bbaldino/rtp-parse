@@ -19,7 +19,7 @@ use super::header_extensions::HeaderExtensions;
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// |              ...extensions (if present)...                    |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[derive(ParselyRead, ParselyWrite)]
+#[derive(Debug, ParselyRead, ParselyWrite, PartialEq)]
 pub struct RtpHeader {
     pub version: u2,
     pub has_padding: bool,
@@ -33,6 +33,24 @@ pub struct RtpHeader {
     #[parsely_read(count = "csrc_count.into()")]
     pub csrcs: Vec<u32>,
     pub extensions: HeaderExtensions,
+}
+
+impl Default for RtpHeader {
+    fn default() -> Self {
+        Self {
+            version: u2::new(2),
+            has_padding: false,
+            has_extensions: false,
+            csrc_count: u4::new(0),
+            marked: false,
+            payload_type: u7::new(0),
+            seq_num: 0,
+            timestamp: 0,
+            ssrc: 0,
+            csrcs: Vec::new(),
+            extensions: HeaderExtensions::default(),
+        }
+    }
 }
 
 #[cfg(test)]

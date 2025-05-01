@@ -41,7 +41,7 @@ use parsely_rs::*;
 ///    16 bytes.  (This permits carriage of 16-byte values, which is a
 ///    common length of labels and identifiers, while losing the possibility
 ///    of zero-length values, which would often be padded anyway.)
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct OneByteHeaderExtension {
     id: u4,
     data: Bits,
@@ -54,12 +54,22 @@ impl OneByteHeaderExtension {
         ext_type == Self::TYPE
     }
 
+    pub fn new(id: u4, data: Bits) -> Self {
+        Self { id, data }
+    }
+
     pub fn id(&self) -> u4 {
         self.id
     }
 
     pub fn data(&self) -> &[u8] {
         self.data.chunk_bytes()
+    }
+}
+
+impl From<OneByteHeaderExtension> for SomeHeaderExtension {
+    fn from(value: OneByteHeaderExtension) -> Self {
+        SomeHeaderExtension::OneByteHeaderExtension(value)
     }
 }
 
@@ -159,7 +169,7 @@ impl_stateless_sync!(OneByteHeaderExtension);
 //    The 8-bit length field is the length of extension data in bytes, not
 //    including the ID and length fields.  The value zero (0) indicates
 //    that there is no subsequent data.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct TwoByteHeaderExtension {
     id: u8,
     data: Bits,
@@ -179,6 +189,12 @@ impl TwoByteHeaderExtension {
 
     pub fn data(&self) -> &[u8] {
         self.data.chunk_bytes()
+    }
+}
+
+impl From<TwoByteHeaderExtension> for SomeHeaderExtension {
+    fn from(value: TwoByteHeaderExtension) -> Self {
+        SomeHeaderExtension::TwoByteHeaderExtension(value)
     }
 }
 
@@ -221,7 +237,7 @@ impl<B: BitBufMut> ParselyWrite<B> for TwoByteHeaderExtension {
 
 impl_stateless_sync!(TwoByteHeaderExtension);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum SomeHeaderExtension {
     OneByteHeaderExtension(OneByteHeaderExtension),
     TwoByteHeaderExtension(TwoByteHeaderExtension),
@@ -256,6 +272,7 @@ impl<B: BitBufMut> ParselyWrite<B> for SomeHeaderExtension {
 
 impl_stateless_sync!(SomeHeaderExtension);
 
+#[derive(Debug, Default, PartialEq)]
 pub struct HeaderExtensions(HashMap<u8, SomeHeaderExtension>);
 
 impl HeaderExtensions {
@@ -284,7 +301,11 @@ impl HeaderExtensions {
     }
 
     /// Add a new header extension.  Returns the prior extension with the same ID, if there was one
-    pub fn add_extension(&mut self, ext: SomeHeaderExtension) -> Option<SomeHeaderExtension> {
+    pub fn add_extension<T: Into<SomeHeaderExtension>>(
+        &mut self,
+        ext: T,
+    ) -> Option<SomeHeaderExtension> {
+        let ext: SomeHeaderExtension = ext.into();
         self.0.insert(ext.id(), ext)
     }
 
