@@ -11,6 +11,8 @@ checksum = "dcfed56ad506cb2c684a14971b8861fdc3baaaae314b9e5f9bb532cbe3ba7a4f"
 [[package]]
 name = "bits-io"
 version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db8ee456cc74052abbbfc9e94cff1484c5b23b200aec976a47854078bc16a272"
 dependencies = [
  "bitvec",
  "bytes",
@@ -128,7 +130,9 @@ dependencies = [
 
 [[package]]
 name = "parsely-impl"
-version = "0.3.0"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "343dc71097995345a68d6cd93393277f7b31743a122a1806f2b1627ca0e5ff6f"
 dependencies = [
  "anyhow",
  "bits-io",
@@ -142,7 +146,9 @@ dependencies = [
 
 [[package]]
 name = "parsely-macro"
-version = "0.1.2"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f68843a15f800804f22f6081f653a89c0d8ae38fda925f39c0e59fd6b18a8db"
 dependencies = [
  "parsely-impl",
  "proc-macro2",
@@ -152,7 +158,9 @@ dependencies = [
 
 [[package]]
 name = "parsely-rs"
-version = "0.1.2"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "461ee245bffc7adb27be51f0e588016359ab6eec12277bc6d2adc327967da427"
 dependencies = [
  "parsely-impl",
  "parsely-macro",
@@ -202,7 +210,6 @@ name = "rtp-parse"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bitvec",
  "bytes",
  "parsely-rs",
 ]
