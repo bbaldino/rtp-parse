@@ -1,24 +1,12 @@
-use std::time::Instant;
+use parsely_rs::*;
 
-use anyhow::{anyhow, bail, Context, Result};
-use bit_cursor::{
-    bit_read_exts::BitReadExts,
-    bit_write_exts::BitWriteExts,
-    byte_order::NetworkOrder,
-    nsw_types::{
-        num_traits::{ConstOne, ConstZero},
-        *,
-    },
-};
+use super::{rtcp_fb_header::RtcpFbHeader, rtcp_header::RtcpHeader};
 
-use crate::{util::consume_padding, BitBuf, BitBufMut};
+const U1_ZERO: u1 = u1::new(0);
+const U1_ONE: u1 = u1::new(1);
 
-use super::{
-    rtcp_fb_header::{write_rtcp_fb_header, RtcpFbHeader},
-    rtcp_header::{write_rtcp_header, RtcpHeader},
-    tcc::chunk::Chunk,
-};
-
+const U2_ZERO: u2 = u2::new(0);
+const U2_ONE: u2 = u2::new(1);
 const U2_TWO: u2 = u2::new(2);
 
 /// https://datatracker.ietf.org/doc/html/draft-holmer-rmcat-transport-wide-cc-extensions-01#section-3.1
@@ -59,188 +47,212 @@ const U2_TWO: u2 = u2::new(2);
 pub struct RtcpFbTccPacket {
     pub header: RtcpHeader,
     pub fb_header: RtcpFbHeader,
-    pub chunks: Vec<SomePacketStatusChunk>,
-    pub deltas: Vec<SomeRecvDelta>,
+    pub packet_reports: Vec<PacketReport>,
     pub reference_time: u24,
     pub feedback_packet_count: u8,
 }
 
 impl RtcpFbTccPacket {
     pub const FMT: u5 = u5::new(15);
+
+    pub fn payload_length_bytes(&self) -> usize {
+        todo!()
+    }
 }
 
-pub fn read_rtcp_fb_tcc<B: BitBuf>(
-    buf: &mut B,
-    header: RtcpHeader,
-    fb_header: RtcpFbHeader,
-) -> Result<RtcpFbTccPacket> {
-    let base_seq_num = buf.read_u16::<NetworkOrder>().context("base seq num")?;
-    let packet_status_count = buf
-        .read_u16::<NetworkOrder>()
-        .context("packet status count")?;
-    let reference_time = buf.read_u24::<NetworkOrder>().context("reference time")?;
-    let feedback_packet_count = buf.read_u8().context("feedback packet count")?;
+impl<B: BitBuf> ParselyRead<B> for RtcpFbTccPacket {
+    type Ctx = (RtcpHeader, RtcpFbHeader);
 
-    let mut num_status_remaining = packet_status_count;
+    fn read<T: ByteOrder>(buf: &mut B, (header, fb_header): Self::Ctx) -> ParselyResult<Self> {
+        let base_seq_num = buf.get_u16::<T>().context("Reading field 'base_seq_num'")?;
+        let packet_status_count = buf
+            .get_u16::<T>()
+            .context("Reading field 'packet_status_count'")?;
+        let reference_time = buf
+            .get_u24::<T>()
+            .context("Reading field 'reference_time'")?;
+        let feedback_packet_count = buf
+            .get_u8()
+            .context("Reading field 'feedback_packet_count'")?;
 
-    let mut chunks: Vec<SomePacketStatusChunk> = vec![];
-    while num_status_remaining > 0 {
-        let chunk = read_some_packet_status_chunk(buf, num_status_remaining as usize)
-            .context("packet status chunk")?;
-        num_status_remaining -= chunk.num_symbols();
-        chunks.push(chunk);
-    }
-    let mut deltas: Vec<SomeRecvDelta> = vec![];
-    // how should we know how many deltas to read? iterate over all symbols? or track them as we
-    // parse the symbols into chunks?
-    todo!()
-}
-
-fn read_rtcp_fb_tcc_data<B: BitBuf>(buf: &mut B) -> Result<(Vec<PacketReport>, u24, u8)> {
-    let base_seq_num = buf.read_u16::<NetworkOrder>().context("base seq num")?;
-    let packet_status_count = buf
-        .read_u16::<NetworkOrder>()
-        .context("packet status count")?;
-    let reference_time = buf.read_u24::<NetworkOrder>().context("reference time")?;
-    let feedback_packet_count = buf.read_u8().context("feedback packet count")?;
-
-    let mut num_status_remaining = packet_status_count;
-
-    let mut chunks: Vec<SomePacketStatusChunk> = Vec::new();
-    while num_status_remaining > 0 {
-        let chunk = read_some_packet_status_chunk(buf, num_status_remaining as usize)
-            .context("packet status chunk")?;
-        num_status_remaining -= chunk.num_symbols();
-        chunks.push(chunk);
-    }
-    let mut curr_seq_num = base_seq_num;
-    let mut packet_reports: Vec<PacketReport> = Vec::new();
-    for chunk in chunks {
-        for status_symbol in chunk {
-            match status_symbol.delta_size_bytes() {
-                0 => packet_reports.push(PacketReport::UnreceivedPacket {
-                    seq_num: curr_seq_num,
-                }),
-                1 => {
-                    let delta_ticks = buf
-                        .read_u8()
-                        .with_context(|| format!("delta ticks for packet {curr_seq_num}"))?;
-                    packet_reports.push(PacketReport::ReceivedPacketSmallDelta {
+        let mut num_status_remaining = packet_status_count;
+        let mut chunks: Vec<SomePacketStatusChunk> = vec![];
+        while num_status_remaining > 0 {
+            let chunk = SomePacketStatusChunk::read::<T>(buf, (num_status_remaining as usize,))
+                .context("packet status chunk")?;
+            num_status_remaining -= chunk.num_symbols();
+            chunks.push(chunk);
+        }
+        let mut packet_reports: Vec<PacketReport> = Vec::new();
+        let mut curr_seq_num = base_seq_num;
+        for chunk in &chunks {
+            for status_symbol in chunk.iter() {
+                match status_symbol.delta_size_bytes() {
+                    0 => packet_reports.push(PacketReport::UnreceivedPacket {
                         seq_num: curr_seq_num,
-                        delta_ticks,
-                    });
+                    }),
+                    1 => {
+                        let delta_ticks = buf
+                            .get_u8()
+                            .with_context(|| format!("delta ticks for packet {curr_seq_num}"))?;
+                        packet_reports.push(PacketReport::ReceivedPacketSmallDelta {
+                            seq_num: curr_seq_num,
+                            delta_ticks,
+                        })
+                    }
+                    2 => {
+                        let delta_ticks = buf
+                            .get_u16::<T>()
+                            .with_context(|| format!("delta ticks for packet {curr_seq_num}"))?
+                            as i16;
+                        packet_reports.push(PacketReport::ReceivedPacketLargeOrNegativeDelta {
+                            seq_num: curr_seq_num,
+                            delta_ticks,
+                        })
+                    }
+                    delta_size_bytes => bail!("Invalid delta size: {delta_size_bytes} bytes"),
                 }
-                2 => {
-                    let delta_ticks = buf
-                        .read_u16::<NetworkOrder>()
-                        .with_context(|| format!("delta ticks for packet {curr_seq_num}"))?
-                        as i16;
-                    packet_reports.push(PacketReport::ReceivedPacketLargeOrNegativeDelta {
-                        seq_num: curr_seq_num,
-                        delta_ticks,
-                    });
-                }
-                delta_size_bytes => bail!("Invalid delta size: {delta_size_bytes} bytes"),
-            }
-            curr_seq_num = curr_seq_num.wrapping_add(1);
-        }
-    }
-    consume_padding(buf);
-    Ok((packet_reports, reference_time, feedback_packet_count))
-}
-
-#[derive(Debug)]
-enum SomeRecvDelta {
-    Small(u8),
-    LargeOrNegative(i16),
-}
-
-fn write_some_recv_delta<B: BitBufMut>(buf: &mut B, delta: SomeRecvDelta) -> Result<()> {
-    match delta {
-        SomeRecvDelta::Small(d) => Ok(buf.write_u8(d)?),
-        // TODO: need support for writing a signed int here
-        SomeRecvDelta::LargeOrNegative(d) => Ok(buf.write_u16::<NetworkOrder>(d as u16)?),
-    }
-}
-
-fn write_rtcp_fb_tcc<B: BitBufMut>(buf: &mut B, fb_tcc: &RtcpFbTccPacket) -> Result<()> {
-    write_rtcp_header(buf, &fb_tcc.header).context("rtcp header")?;
-    write_rtcp_fb_header(buf, &fb_tcc.fb_header).context("fb header")?;
-
-    write_rtcp_fb_tcc_data(buf, &fb_tcc.packet_reports, fb_tcc.reference_time)
-        .context("fb tcc data")?;
-
-    Ok(())
-}
-
-/// Write the FB TCC packet data.  Note that `packet_reports` should be a _continuous_ set of
-/// reports: all NotReceived values should have already been inserted.
-fn write_rtcp_fb_tcc_data<B: BitBufMut>(
-    buf: &mut B,
-    packet_reports: &[PacketReport],
-    reference_time: u24,
-) -> Result<()> {
-    let base_seq_num = packet_reports[0].seq_num();
-    buf.write_u16::<NetworkOrder>(base_seq_num)
-        .context("base seq num")?;
-    buf.write_u16::<NetworkOrder>(packet_reports.len() as u16)
-        .context("packet status count")?;
-    buf.write_u24::<NetworkOrder>(reference_time)
-        .context("reference time")?;
-
-    let (feedback_packet_count, chunks, deltas) = prepare_packet_reports(&packet_reports);
-    buf.write_u8(feedback_packet_count)
-        .context("feedback packet count")?;
-
-    for chunk in chunks {
-        write_some_packet_status_chunk(chunk, buf).context("packet status chunk")?;
-    }
-
-    for delta in deltas {
-        write_some_recv_delta(buf, delta).context("delta")?;
-    }
-
-    Ok(())
-}
-
-fn prepare_packet_reports(
-    packet_reports: &[PacketReport],
-) -> (u8, Vec<SomePacketStatusChunk>, Vec<SomeRecvDelta>) {
-    let mut expected_seq_num = packet_reports[0].seq_num();
-    let mut chunks: Vec<SomePacketStatusChunk> = vec![];
-    let mut deltas: Vec<SomeRecvDelta> = vec![];
-    let mut curr_chunk = Chunk::default();
-    let mut seq_num_count = 0u8;
-    for packet_report in packet_reports {
-        while expected_seq_num != packet_report.seq_num() {
-            if !curr_chunk.can_add(PacketStatusSymbol::NotReceived) {
-                chunks.push(curr_chunk.emit());
-            }
-            curr_chunk.add(PacketStatusSymbol::NotReceived);
-            expected_seq_num = expected_seq_num.wrapping_add(1);
-            seq_num_count = seq_num_count.wrapping_add(1);
-        }
-
-        if !curr_chunk.can_add(packet_report.symbol()) {
-            chunks.push(curr_chunk.emit());
-        }
-        match packet_report {
-            PacketReport::UnreceivedPacket { .. } => (),
-            PacketReport::ReceivedPacketSmallDelta { delta_ticks, .. } => {
-                deltas.push(SomeRecvDelta::Small(*delta_ticks))
-            }
-            PacketReport::ReceivedPacketLargeOrNegativeDelta { delta_ticks, .. } => {
-                deltas.push(SomeRecvDelta::LargeOrNegative(*delta_ticks))
+                curr_seq_num = curr_seq_num.wrapping_add(1);
             }
         }
-
-        expected_seq_num = expected_seq_num.wrapping_add(1);
-        seq_num_count = seq_num_count.wrapping_add(1);
+        Ok(RtcpFbTccPacket {
+            header,
+            fb_header,
+            packet_reports,
+            reference_time,
+            feedback_packet_count,
+        })
     }
-    chunks.push(curr_chunk.emit());
-
-    (seq_num_count, chunks, deltas)
 }
+
+impl<B: BitBufMut> ParselyWrite<B> for RtcpFbTccPacket {
+    type Ctx = ();
+
+    fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<()> {
+        self.header.write::<T>(buf, ()).context("header")?;
+        self.fb_header.write::<T>(buf, ()).context("fb header")?;
+
+        if self.packet_reports.is_empty() {
+            return Ok(());
+        }
+        let base_seq_num = self.packet_reports[0].seq_num();
+        let packet_status_count = self.packet_reports.len() as u16;
+        buf.put_u16::<T>(base_seq_num).context("base_seq_num")?;
+        buf.put_u16::<T>(packet_status_count)
+            .context("packet_status_count")?;
+        buf.put_u24::<T>(self.reference_time)
+            .context("reference_time")?;
+        buf.put_u8(self.feedback_packet_count)
+            .context("feedback_packet_count")?;
+        todo!()
+    }
+}
+
+impl StateSync for RtcpFbTccPacket {
+    type SyncCtx = ();
+
+    fn sync(&mut self, _sync_ctx: Self::SyncCtx) -> ParselyResult<()> {
+        self.header
+            .sync((self.payload_length_bytes() as u16, Self::FMT))?;
+
+        self.packet_reports.sort_by_key(|pr| pr.seq_num());
+
+        Ok(())
+    }
+}
+
+// #[derive(Debug)]
+// enum SomeRecvDelta {
+//     Small(u8),
+//     LargeOrNegative(i16),
+// }
+
+// fn write_some_recv_delta<B: BitBufMut>(buf: &mut B, delta: SomeRecvDelta) -> Result<()> {
+//     match delta {
+//         SomeRecvDelta::Small(d) => Ok(buf.write_u8(d)?),
+//         // TODO: need support for writing a signed int here
+//         SomeRecvDelta::LargeOrNegative(d) => Ok(buf.write_u16::<NetworkOrder>(d as u16)?),
+//     }
+// }
+//
+// fn write_rtcp_fb_tcc<B: BitBufMut>(buf: &mut B, fb_tcc: &RtcpFbTccPacket) -> Result<()> {
+//     write_rtcp_header(buf, &fb_tcc.header).context("rtcp header")?;
+//     write_rtcp_fb_header(buf, &fb_tcc.fb_header).context("fb header")?;
+//
+//     write_rtcp_fb_tcc_data(buf, &fb_tcc.packet_reports, fb_tcc.reference_time)
+//         .context("fb tcc data")?;
+//
+//     Ok(())
+// }
+//
+// /// Write the FB TCC packet data.  Note that `packet_reports` should be a _continuous_ set of
+// /// reports: all NotReceived values should have already been inserted.
+// fn write_rtcp_fb_tcc_data<B: BitBufMut>(
+//     buf: &mut B,
+//     packet_reports: &[PacketReport],
+//     reference_time: u24,
+// ) -> Result<()> {
+//     let base_seq_num = packet_reports[0].seq_num();
+//     buf.write_u16::<NetworkOrder>(base_seq_num)
+//         .context("base seq num")?;
+//     buf.write_u16::<NetworkOrder>(packet_reports.len() as u16)
+//         .context("packet status count")?;
+//     buf.write_u24::<NetworkOrder>(reference_time)
+//         .context("reference time")?;
+//
+//     let (feedback_packet_count, chunks, deltas) = prepare_packet_reports(&packet_reports);
+//     buf.write_u8(feedback_packet_count)
+//         .context("feedback packet count")?;
+//
+//     for chunk in chunks {
+//         write_some_packet_status_chunk(chunk, buf).context("packet status chunk")?;
+//     }
+//
+//     for delta in deltas {
+//         write_some_recv_delta(buf, delta).context("delta")?;
+//     }
+//
+//     Ok(())
+// }
+//
+// fn prepare_packet_reports(
+//     packet_reports: &[PacketReport],
+// ) -> (u8, Vec<SomePacketStatusChunk>, Vec<SomeRecvDelta>) {
+//     let mut expected_seq_num = packet_reports[0].seq_num();
+//     let mut chunks: Vec<SomePacketStatusChunk> = vec![];
+//     let mut deltas: Vec<SomeRecvDelta> = vec![];
+//     let mut curr_chunk = Chunk::default();
+//     let mut seq_num_count = 0u8;
+//     for packet_report in packet_reports {
+//         while expected_seq_num != packet_report.seq_num() {
+//             if !curr_chunk.can_add(PacketStatusSymbol::NotReceived) {
+//                 chunks.push(curr_chunk.emit());
+//             }
+//             curr_chunk.add(PacketStatusSymbol::NotReceived);
+//             expected_seq_num = expected_seq_num.wrapping_add(1);
+//             seq_num_count = seq_num_count.wrapping_add(1);
+//         }
+//
+//         if !curr_chunk.can_add(packet_report.symbol()) {
+//             chunks.push(curr_chunk.emit());
+//         }
+//         match packet_report {
+//             PacketReport::UnreceivedPacket { .. } => (),
+//             PacketReport::ReceivedPacketSmallDelta { delta_ticks, .. } => {
+//                 deltas.push(SomeRecvDelta::Small(*delta_ticks))
+//             }
+//             PacketReport::ReceivedPacketLargeOrNegativeDelta { delta_ticks, .. } => {
+//                 deltas.push(SomeRecvDelta::LargeOrNegative(*delta_ticks))
+//             }
+//         }
+//
+//         expected_seq_num = expected_seq_num.wrapping_add(1);
+//         seq_num_count = seq_num_count.wrapping_add(1);
+//     }
+//     chunks.push(curr_chunk.emit());
+//
+//     (seq_num_count, chunks, deltas)
+// }
 
 #[derive(Debug, PartialEq)]
 pub enum PacketReport {
@@ -250,7 +262,7 @@ pub enum PacketReport {
 }
 
 impl PacketReport {
-    fn seq_num(&self) -> u16 {
+    pub fn seq_num(&self) -> u16 {
         match self {
             Self::UnreceivedPacket { seq_num } => *seq_num,
             Self::ReceivedPacketSmallDelta { seq_num, .. } => *seq_num,
@@ -258,7 +270,7 @@ impl PacketReport {
         }
     }
 
-    fn symbol(&self) -> PacketStatusSymbol {
+    pub fn symbol(&self) -> PacketStatusSymbol {
         match self {
             PacketReport::UnreceivedPacket { .. } => PacketStatusSymbol::NotReceived,
             PacketReport::ReceivedPacketSmallDelta { .. } => PacketStatusSymbol::ReceivedSmallDelta,
@@ -277,14 +289,14 @@ pub enum PacketStatusSymbol {
 }
 
 impl PacketStatusSymbol {
-    pub(crate) fn from_delta_size(delta_size: u8) -> Self {
-        match delta_size {
-            0 => PacketStatusSymbol::NotReceived,
-            1 => PacketStatusSymbol::ReceivedSmallDelta,
-            2 => PacketStatusSymbol::ReceivedLargeOrNegativeDelta,
-            _ => todo!("invalid"),
-        }
-    }
+    // pub(crate) fn from_delta_size(delta_size: u8) -> Self {
+    //     match delta_size {
+    //         0 => PacketStatusSymbol::NotReceived,
+    //         1 => PacketStatusSymbol::ReceivedSmallDelta,
+    //         2 => PacketStatusSymbol::ReceivedLargeOrNegativeDelta,
+    //         _ => todo!("invalid"),
+    //     }
+    // }
 
     pub(crate) fn delta_size_bytes(&self) -> u8 {
         match self {
@@ -298,9 +310,23 @@ impl PacketStatusSymbol {
 impl From<u1> for PacketStatusSymbol {
     fn from(value: u1) -> Self {
         match value {
-            u1::ZERO => PacketStatusSymbol::NotReceived,
-            u1::ONE => PacketStatusSymbol::ReceivedSmallDelta,
+            U1_ZERO => PacketStatusSymbol::NotReceived,
+            U1_ONE => PacketStatusSymbol::ReceivedSmallDelta,
             _ => unreachable!(),
+        }
+    }
+}
+
+impl TryInto<u1> for &PacketStatusSymbol {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> std::prelude::v1::Result<u1, Self::Error> {
+        match self {
+            PacketStatusSymbol::NotReceived => Ok(U1_ZERO),
+            PacketStatusSymbol::ReceivedSmallDelta => Ok(U1_ONE),
+            PacketStatusSymbol::ReceivedLargeOrNegativeDelta => Err(anyhow!(
+                "PacketStatusSymbol::ReceivedLargeOrNegativeDelta can't be encoded into a u1"
+            )),
         }
     }
 }
@@ -309,13 +335,7 @@ impl TryInto<u1> for PacketStatusSymbol {
     type Error = anyhow::Error;
 
     fn try_into(self) -> std::prelude::v1::Result<u1, Self::Error> {
-        match self {
-            PacketStatusSymbol::NotReceived => Ok(u1::ZERO),
-            PacketStatusSymbol::ReceivedSmallDelta => Ok(u1::ONE),
-            PacketStatusSymbol::ReceivedLargeOrNegativeDelta => Err(anyhow!(
-                "PacketStatusSymbol::ReceivedLargeOrNegativeDelta can't be encoded into a u1"
-            )),
-        }
+        (&self).try_into()
     }
 }
 
@@ -324,21 +344,27 @@ impl TryFrom<u2> for PacketStatusSymbol {
 
     fn try_from(value: u2) -> std::prelude::v1::Result<Self, Self::Error> {
         match value {
-            u2::ZERO => Ok(PacketStatusSymbol::NotReceived),
-            u2::ONE => Ok(PacketStatusSymbol::ReceivedSmallDelta),
+            U2_ZERO => Ok(PacketStatusSymbol::NotReceived),
+            U2_ONE => Ok(PacketStatusSymbol::ReceivedSmallDelta),
             U2_TWO => Ok(PacketStatusSymbol::ReceivedLargeOrNegativeDelta),
             pss => Err(anyhow!("Invalid 2 bit packet status symbol: {pss}")),
         }
     }
 }
 
+impl From<&PacketStatusSymbol> for u2 {
+    fn from(val: &PacketStatusSymbol) -> Self {
+        match val {
+            PacketStatusSymbol::NotReceived => u2::new(0),
+            PacketStatusSymbol::ReceivedSmallDelta => u2::new(1),
+            PacketStatusSymbol::ReceivedLargeOrNegativeDelta => u2::new(2),
+        }
+    }
+}
+
 impl From<PacketStatusSymbol> for u2 {
     fn from(val: PacketStatusSymbol) -> Self {
-        match val {
-            PacketStatusSymbol::NotReceived => u2::ZERO,
-            PacketStatusSymbol::ReceivedSmallDelta => u2::ONE,
-            PacketStatusSymbol::ReceivedLargeOrNegativeDelta => U2_TWO,
-        }
+        (&val).into()
     }
 }
 
@@ -374,80 +400,79 @@ impl StatusVectorChunk {
             .iter()
             .any(|ss| matches!(ss, PacketStatusSymbol::ReceivedLargeOrNegativeDelta))
     }
-}
 
-impl IntoIterator for StatusVectorChunk {
-    type Item = PacketStatusSymbol;
-
-    type IntoIter = <Vec<PacketStatusSymbol> as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+    fn iter(&self) -> std::slice::Iter<'_, PacketStatusSymbol> {
+        self.0.iter()
     }
 }
 
 /// This method assumes buf's position is at the symbol-size bit.
-pub fn read_status_vector_chunk<B: BitBuf>(
-    buf: &mut B,
-    max_symbol_count: usize,
-) -> Result<StatusVectorChunk> {
-    let symbol_size = buf.read_u1().context("symbol size")?;
-    let mut packet_status_symbols = match symbol_size {
-        u1::ZERO => {
-            // 1 bit symbols
-            (0..14)
-                .map(|i| {
-                    buf.read_u1()
-                        .with_context(|| format!("packet status symbol {i}"))
-                        .map(|v| v.into())
-                })
-                .collect::<Result<Vec<PacketStatusSymbol>>>()
-                .context("1 bit packet status symbols")
-        }
-        u1::ONE => {
-            // 2 bit symbols
-            (0..7)
-                .map(|i| {
-                    buf.read_u2()
-                        .with_context(|| format!("packet status symbol {i}"))?
-                        .try_into()
-                        .context("converting u2 to packet status symbol")
-                })
-                .collect::<Result<Vec<PacketStatusSymbol>>>()
-                .context("2 bit packet status symbols")
-        }
-        _ => unreachable!("u1 can only be 0 or 1"),
-    }?;
+impl<B: BitBuf> ParselyRead<B> for StatusVectorChunk {
+    type Ctx = (usize,);
 
-    // Even when the number of packet status symbols is less than the entire 14 bits, we still need
-    // to consume the entire chunk, so we read all the symbols above to consume the proper amount
-    // of the buffer and then chop off any symbols that shouldn't actually be included here.
-    packet_status_symbols.truncate(max_symbol_count);
-
-    Ok(StatusVectorChunk(packet_status_symbols))
-}
-
-pub fn write_status_vector_chunk<B: BitBufMut>(
-    sv_chunk: StatusVectorChunk,
-    buf: &mut B,
-) -> Result<()> {
-    buf.write_u1(u1::ONE).context("sv chunk type")?;
-    if sv_chunk.has_two_bit_symbols() {
-        buf.write_u1(u1::ONE).context("sv chunk symbol size")?;
-        for (i, symbol) in sv_chunk.into_iter().enumerate() {
-            buf.write_u2(symbol.into())
-                .context(format!("2 bit sv chunk symbol {i}"))?;
+    fn read<T: ByteOrder>(buf: &mut B, (max_symbol_count,): Self::Ctx) -> ParselyResult<Self> {
+        let symbol_size = buf.get_u1().context("symbol size")?;
+        let mut packet_status_symbols = match symbol_size {
+            s if s == 0 => {
+                // 1 bit symbols
+                (0..14)
+                    .map(|i| {
+                        buf.get_u1()
+                            .with_context(|| format!("packet status symbol {i}"))
+                            .map(|v| v.into())
+                    })
+                    .collect::<ParselyResult<Vec<PacketStatusSymbol>>>()
+                    .context("1 bit packet status symbols")
+            }
+            s if s == 1 => {
+                // 2 bit symbols
+                (0..7)
+                    .map(|i| {
+                        buf.get_u2()
+                            .with_context(|| format!("packet status symbol {i}"))?
+                            .try_into()
+                            .context("converting u2 to packet status symbol")
+                    })
+                    .collect::<ParselyResult<Vec<PacketStatusSymbol>>>()
+                    .context("2 bit packet status symbols")
+            }
+            _ => unreachable!("u1 can only be 1 or 0"),
         }
-    } else {
-        buf.write_u1(u1::ZERO).context("sv chunk symbol size")?;
-        for (i, symbol) in sv_chunk.into_iter().enumerate() {
-            buf.write_u1(symbol.try_into().context("sv symbol encoding into 1 bit")?)
-                .context(format!("1 bit sv chunk symbol {i}"))?;
-        }
+        .context("Packet status symbols")?;
+
+        packet_status_symbols.truncate(max_symbol_count);
+
+        Ok(StatusVectorChunk(packet_status_symbols))
     }
-
-    Ok(())
 }
+
+impl<B: BitBufMut> ParselyWrite<B> for StatusVectorChunk {
+    type Ctx = ();
+
+    fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<()> {
+        buf.put_u1(u1::new(1)).context("SV chunk type")?;
+        if self.has_two_bit_symbols() {
+            buf.put_u1(u1::new(1)).context("SV chunk symbol size")?;
+            for (i, symbol) in self.iter().enumerate() {
+                buf.put_u2(symbol.into())
+                    .with_context(|| format!("2 bit sv chunk symbol {i}"))?;
+            }
+        } else {
+            buf.put_u1(u1::new(0)).context("SV chunk symbol size")?;
+            for (i, symbol) in self.iter().enumerate() {
+                buf.put_u1(
+                    symbol
+                        .try_into()
+                        .context("Trying to convert status symbol to u1")?,
+                )
+                .with_context(|| format!("2 bit sv chunk symbol {i}"))?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl_stateless_sync!(StatusVectorChunk);
 
 /// A run length chunk starts with 0 bit, followed by a packet status
 /// symbol and the run length of that symbol.
@@ -471,65 +496,37 @@ pub struct RunLengthEncodingChunk {
     pub run_length: u13,
 }
 
-pub struct RunLengthEncodingIterator {
-    symbol: PacketStatusSymbol,
-    curr_idx: u32,
-    length: u32,
-}
+/// Assumes the buf's position is at the packet status symbol bit
+impl<B: BitBuf> ParselyRead<B> for RunLengthEncodingChunk {
+    type Ctx = ();
 
-impl Iterator for RunLengthEncodingIterator {
-    type Item = PacketStatusSymbol;
+    fn read<T: ByteOrder>(buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<Self> {
+        let symbol = buf
+            .get_u2()
+            .context("Reading run length encoding symbol")?
+            .try_into()
+            .context("Converting u2 to packet status symbol")?;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.curr_idx < self.length {
-            self.curr_idx += 1;
-            Some(self.symbol)
-        } else {
-            None
-        }
+        let run_length = buf.get_u13::<T>().context("Reading run length")?;
+
+        Ok(RunLengthEncodingChunk { symbol, run_length })
     }
 }
 
-impl IntoIterator for RunLengthEncodingChunk {
-    type Item = PacketStatusSymbol;
+impl<B: BitBufMut> ParselyWrite<B> for RunLengthEncodingChunk {
+    type Ctx = ();
 
-    type IntoIter = RunLengthEncodingIterator;
+    fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<()> {
+        buf.put_u1(u1::new(0)).context("rle chunk type")?;
+        buf.put_u2(self.symbol.into()).context("rle chunk symbol")?;
+        buf.put_u13::<T>(self.run_length)
+            .context("rle chunk run length")?;
 
-    fn into_iter(self) -> Self::IntoIter {
-        RunLengthEncodingIterator {
-            symbol: self.symbol,
-            curr_idx: 0,
-            length: self.run_length.into(),
-        }
+        Ok(())
     }
 }
 
-/// This method assumes buf's position is at the packet status symbol bit
-pub fn read_run_length_encoding_chunk<B: BitBuf>(
-    buf: &mut B,
-) -> Result<RunLengthEncodingChunk> {
-    let symbol = buf
-        .read_u2()
-        .context("packet status symbol")?
-        .try_into()
-        .context("convert u2 to packet status symbol")?;
-    let run_length = buf.read_u13::<NetworkOrder>().context("run length")?;
-
-    Ok(RunLengthEncodingChunk { symbol, run_length })
-}
-
-pub fn write_run_length_encoding_chunk<B: BitBufMut>(
-    rle_chunk: RunLengthEncodingChunk,
-    buf: &mut B,
-) -> Result<()> {
-    buf.write_u1(u1::ZERO).context("rle chunk type")?;
-    buf.write_u2(rle_chunk.symbol.into())
-        .context("rle chunk symbol")?;
-    buf.write_u13::<NetworkOrder>(rle_chunk.run_length)
-        .context("rle chunk length")?;
-
-    Ok(())
-}
+impl_stateless_sync!(RunLengthEncodingChunk);
 
 #[derive(Debug, Clone)]
 pub(crate) enum SomePacketStatusChunk {
@@ -537,18 +534,25 @@ pub(crate) enum SomePacketStatusChunk {
     RunLengthEncodingChunk(RunLengthEncodingChunk),
 }
 
-pub(crate) enum SomePacketStatusChunkIterator {
-    RunLengthEncodingChunkIterator(RunLengthEncodingIterator),
-    StatusVectorChunkIterator(<StatusVectorChunk as IntoIterator>::IntoIter),
+pub(crate) enum SomePacketStatusChunkIterator<'a> {
+    StatusVector(std::slice::Iter<'a, PacketStatusSymbol>),
+    RunLength(std::iter::Repeat<PacketStatusSymbol>, usize), // (iter, remaining count)
 }
 
-impl Iterator for SomePacketStatusChunkIterator {
+impl Iterator for SomePacketStatusChunkIterator<'_> {
     type Item = PacketStatusSymbol;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            SomePacketStatusChunkIterator::StatusVectorChunkIterator(i) => i.next(),
-            SomePacketStatusChunkIterator::RunLengthEncodingChunkIterator(i) => i.next(),
+            SomePacketStatusChunkIterator::StatusVector(iter) => iter.next().copied(),
+            SomePacketStatusChunkIterator::RunLength(iter, remaining) => {
+                if *remaining == 0 {
+                    None
+                } else {
+                    *remaining -= 1;
+                    iter.next()
+                }
+            }
         }
     }
 }
@@ -560,77 +564,72 @@ impl SomePacketStatusChunk {
             SomePacketStatusChunk::RunLengthEncodingChunk(rlec) => rlec.run_length.into(),
         }
     }
-}
 
-impl IntoIterator for SomePacketStatusChunk {
-    type Item = PacketStatusSymbol;
-
-    type IntoIter = SomePacketStatusChunkIterator;
-
-    fn into_iter(self) -> Self::IntoIter {
+    pub fn iter(&self) -> SomePacketStatusChunkIterator<'_> {
         match self {
-            SomePacketStatusChunk::StatusVectorChunk(svc) => {
-                SomePacketStatusChunkIterator::StatusVectorChunkIterator(svc.into_iter())
+            SomePacketStatusChunk::StatusVectorChunk(StatusVectorChunk(vec)) => {
+                SomePacketStatusChunkIterator::StatusVector(vec.iter())
             }
-            SomePacketStatusChunk::RunLengthEncodingChunk(rlec) => {
-                SomePacketStatusChunkIterator::RunLengthEncodingChunkIterator(rlec.into_iter())
+            SomePacketStatusChunk::RunLengthEncodingChunk(chunk) => {
+                SomePacketStatusChunkIterator::RunLength(
+                    std::iter::repeat(chunk.symbol),
+                    chunk.run_length.into(),
+                )
             }
         }
     }
 }
 
-fn read_some_packet_status_chunk<B: BitBuf>(
-    buf: &mut B,
-    max_symbol_count: usize,
-) -> Result<SomePacketStatusChunk> {
-    let chunk_type = buf.read_u1().context("chunk type")?;
-    match chunk_type {
-        u1::ZERO => read_run_length_encoding_chunk(buf)
-            .map(SomePacketStatusChunk::RunLengthEncodingChunk)
-            .context("run length encoding chunk"),
-        u1::ONE => read_status_vector_chunk(buf, max_symbol_count)
-            .map(SomePacketStatusChunk::StatusVectorChunk)
-            .context("status vector chunk"),
-        _ => unreachable!(),
+impl<B: BitBuf> ParselyRead<B> for SomePacketStatusChunk {
+    type Ctx = (usize,);
+
+    fn read<T: ByteOrder>(buf: &mut B, (max_symbol_count,): Self::Ctx) -> ParselyResult<Self> {
+        let chunk_type = buf.get_u1().context("chunk type")?;
+        match chunk_type {
+            ct if ct == 0 => RunLengthEncodingChunk::read::<T>(buf, ())
+                .map(SomePacketStatusChunk::RunLengthEncodingChunk)
+                .context("run length encoding chunk"),
+            ct if ct == 1 => StatusVectorChunk::read::<T>(buf, (max_symbol_count,))
+                .map(SomePacketStatusChunk::StatusVectorChunk)
+                .context("status vector chunk"),
+            _ => unreachable!(),
+        }
     }
 }
 
-pub(crate) fn write_some_packet_status_chunk<B: BitBufMut>(
-    chunk: SomePacketStatusChunk,
-    buf: &mut B,
-) -> Result<()> {
-    match chunk {
-        SomePacketStatusChunk::StatusVectorChunk(svc) => {
-            write_status_vector_chunk(svc, buf).context("sv chunk")?
+impl<B: BitBufMut> ParselyWrite<B> for SomePacketStatusChunk {
+    type Ctx = ();
+
+    fn write<T: ByteOrder>(&self, buf: &mut B, _ctx: Self::Ctx) -> ParselyResult<()> {
+        match self {
+            SomePacketStatusChunk::RunLengthEncodingChunk(rle_chunk) => {
+                rle_chunk.write::<T>(buf, ())?
+            }
+            SomePacketStatusChunk::StatusVectorChunk(sv_chunk) => sv_chunk.write::<T>(buf, ())?,
         }
-        SomePacketStatusChunk::RunLengthEncodingChunk(rlec) => {
-            write_run_length_encoding_chunk(rlec, buf).context("rle chunk")?
-        }
+        Ok(())
     }
-    Ok(())
 }
+
+impl_stateless_sync!(SomePacketStatusChunk);
 
 #[cfg(test)]
 mod test {
-    use std::io::Seek;
-
-    use bit_cursor::{bit_cursor::BitCursor, nsw_types::u24};
-    use bitvec::{bits, order::Msb0, vec::BitVec};
-
-    use crate::rtcp::rtcp_fb_tcc::{write_status_vector_chunk, PacketReport, PacketStatusSymbol};
-
-    use super::{read_rtcp_fb_tcc_data, read_status_vector_chunk};
+    use super::*;
+    use bits_io::prelude::*;
 
     #[test]
     fn test_sv_chunk_1_bit_symbols() {
-        let chunk_data = bits!(u8, Msb0; 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1);
-        let mut cursor = BitCursor::new(chunk_data);
-        // Advance past the chunk type at the beginning, which read_status_vector_chunk ass
-        cursor.seek(std::io::SeekFrom::Start(1)).unwrap();
+        let chunk_data = bits!(1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1);
+        let mut bits = Bits::copy_from_bit_slice(chunk_data);
+        // Advance past the chunk type bit since we're calling StatusVectorChunk::read directly and
+        // it assumes that bit has already been read
+        bits.advance_bits(1);
 
-        let sv_chunk = read_status_vector_chunk(&mut cursor, 14).unwrap();
+        let sv_chunk = StatusVectorChunk::read::<NetworkOrder>(&mut bits, (14,)).unwrap();
+
         assert_eq!(sv_chunk.0.len(), 14);
-        assert!(cursor.remaining_slice().is_empty());
+        assert!(bits.is_empty());
         assert_eq!(
             sv_chunk.0,
             vec![
@@ -651,21 +650,18 @@ mod test {
             ]
         );
 
-        let data: Vec<u8> = vec![0; 2];
-        let mut cursor = BitCursor::from_vec(data);
-        write_status_vector_chunk(sv_chunk, &mut cursor).unwrap();
-        let data = cursor.into_inner();
-        assert_eq!(chunk_data, data);
+        let mut bits_mut = BitsMut::new();
+        sv_chunk.write::<NetworkOrder>(&mut bits_mut, ()).unwrap();
+        assert_eq!(chunk_data, bits_mut.as_ref());
     }
 
     #[test]
     fn test_sv_chunk_1_bit_symbols_with_limit() {
-        let chunk = bits!(u8, Msb0; 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1);
-        let mut cursor = BitCursor::new(chunk);
+        let mut chunk_data = bits!(0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1);
 
-        let sv_chunk = read_status_vector_chunk(&mut cursor, 3).unwrap();
+        let sv_chunk = StatusVectorChunk::read::<NetworkOrder>(&mut chunk_data, (3,)).unwrap();
         assert_eq!(sv_chunk.0.len(), 3);
-        assert!(cursor.remaining_slice().is_empty());
+        assert!(chunk_data.is_empty());
         assert_eq!(
             sv_chunk.0,
             vec![
@@ -678,12 +674,13 @@ mod test {
 
     #[test]
     fn test_sv_chunk_2_bit_symbols() {
-        let chunk = bits!(u8, Msb0; 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0);
-        let mut cursor = BitCursor::new(chunk);
+        let chunk_data = bits!(1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0);
+        let mut bits = Bits::copy_from_bit_slice(chunk_data);
+        bits.advance_bits(1);
 
-        let sv_chunk = read_status_vector_chunk(&mut cursor, 14).unwrap();
+        let sv_chunk = StatusVectorChunk::read::<NetworkOrder>(&mut bits, (15,)).unwrap();
         assert_eq!(sv_chunk.0.len(), 7);
-        assert!(cursor.remaining_slice().is_empty());
+        assert!(bits.is_empty());
         assert_eq!(
             sv_chunk.0,
             vec![
@@ -696,24 +693,46 @@ mod test {
                 PacketStatusSymbol::NotReceived,
             ]
         );
+
+        let mut bits_mut = BitsMut::new();
+        sv_chunk.write::<NetworkOrder>(&mut bits_mut, ()).unwrap();
+        assert_eq!(chunk_data, bits_mut.as_ref());
     }
 
     #[test]
-    fn test_read_tcc_fb_data() {
+    fn test_rle_chunk() {
+        let chunk_data = bits!(0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1);
+        let mut bits = Bits::copy_from_bit_slice(chunk_data);
+        bits.advance_bits(1);
+
+        let rle_chunk = RunLengthEncodingChunk::read::<NetworkOrder>(&mut bits, ()).unwrap();
+        assert!(bits.is_empty());
+        assert_eq!(rle_chunk.symbol, PacketStatusSymbol::ReceivedSmallDelta);
+        assert_eq!(rle_chunk.run_length, 0b0000000010101);
+
+        let mut bits_mut = BitsMut::new();
+        rle_chunk.write::<NetworkOrder>(&mut bits_mut, ()).unwrap();
+        assert_eq!(chunk_data, bits_mut.as_ref());
+    }
+
+    #[test]
+    fn test_rtcp_fb_tcc_packet() {
         #[rustfmt::skip]
         let data_buf = [
             0x01, 0x81, 0x00, 0x08, 0x19, 0xae, 0xe8, 0x45,
             0xd9, 0x55, 0x20, 0x01, 0xa8, 0xff, 0xfc, 0x04,
-            0x00, 0x50, 0x04, 0x00, 0x00, 0x00, 0x00, 00
+            0x00, 0x50, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00
         ];
-        let mut cursor = BitCursor::new(BitVec::<u8, Msb0>::from_slice(&data_buf));
-        let (packet_reports, reference_time, feedback_packet_count) =
-            read_rtcp_fb_tcc_data(&mut cursor).unwrap();
-
-        assert_eq!(reference_time, u24::new(1683176));
-        assert_eq!(feedback_packet_count, 69);
+        let mut bits = Bits::copy_from_bytes(&data_buf[..]);
+        let tcc_packet = RtcpFbTccPacket::read::<NetworkOrder>(
+            &mut bits,
+            (RtcpHeader::default(), RtcpFbHeader::default()),
+        )
+        .unwrap();
+        assert_eq!(tcc_packet.reference_time, u24::new(1683176));
+        assert_eq!(tcc_packet.feedback_packet_count, 69);
         assert_eq!(
-            packet_reports,
+            tcc_packet.packet_reports,
             [
                 PacketReport::ReceivedPacketSmallDelta {
                     seq_num: 385,
@@ -749,6 +768,60 @@ mod test {
                 },
             ]
         );
-        dbg!(packet_reports);
     }
+
+    //
+    // #[test]
+    // fn test_read_tcc_fb_data() {
+    //     #[rustfmt::skip]
+    //     let data_buf = [
+    //         0x01, 0x81, 0x00, 0x08, 0x19, 0xae, 0xe8, 0x45,
+    //         0xd9, 0x55, 0x20, 0x01, 0xa8, 0xff, 0xfc, 0x04,
+    //         0x00, 0x50, 0x04, 0x00, 0x00, 0x00, 0x00, 00
+    //     ];
+    //     let mut cursor = BitCursor::new(BitVec::<u8, Msb0>::from_slice(&data_buf));
+    //     let (packet_reports, reference_time, feedback_packet_count) =
+    //         read_rtcp_fb_tcc_data(&mut cursor).unwrap();
+    //
+    //     assert_eq!(reference_time, u24::new(1683176));
+    //     assert_eq!(feedback_packet_count, 69);
+    //     assert_eq!(
+    //         packet_reports,
+    //         [
+    //             PacketReport::ReceivedPacketSmallDelta {
+    //                 seq_num: 385,
+    //                 delta_ticks: 168,
+    //             },
+    //             PacketReport::ReceivedPacketLargeOrNegativeDelta {
+    //                 seq_num: 386,
+    //                 delta_ticks: -4,
+    //             },
+    //             PacketReport::ReceivedPacketSmallDelta {
+    //                 seq_num: 387,
+    //                 delta_ticks: 4,
+    //             },
+    //             PacketReport::ReceivedPacketSmallDelta {
+    //                 seq_num: 388,
+    //                 delta_ticks: 0,
+    //             },
+    //             PacketReport::ReceivedPacketSmallDelta {
+    //                 seq_num: 389,
+    //                 delta_ticks: 80,
+    //             },
+    //             PacketReport::ReceivedPacketSmallDelta {
+    //                 seq_num: 390,
+    //                 delta_ticks: 4,
+    //             },
+    //             PacketReport::ReceivedPacketSmallDelta {
+    //                 seq_num: 391,
+    //                 delta_ticks: 0,
+    //             },
+    //             PacketReport::ReceivedPacketSmallDelta {
+    //                 seq_num: 392,
+    //                 delta_ticks: 0,
+    //             },
+    //         ]
+    //     );
+    //     dbg!(packet_reports);
+    // }
 }

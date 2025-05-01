@@ -210,6 +210,7 @@ name = "rtp-parse"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bits-io",
  "bytes",
  "parsely-rs",
 ]
