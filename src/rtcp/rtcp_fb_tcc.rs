@@ -84,7 +84,8 @@ impl<B: BitBuf> ParselyRead<B> for RtcpFbTccPacket {
             num_status_remaining -= chunk.num_symbols();
             chunks.push(chunk);
         }
-        let mut packet_reports: Vec<PacketReport> = Vec::new();
+        let mut packet_reports: Vec<PacketReport> =
+            Vec::with_capacity(packet_status_count as usize);
         let mut curr_seq_num = base_seq_num;
         for chunk in &chunks {
             for status_symbol in chunk.iter() {
@@ -419,30 +420,31 @@ impl<B: BitBuf> ParselyRead<B> for StatusVectorChunk {
         let mut packet_status_symbols = match symbol_size {
             s if s == 0 => {
                 // 1 bit symbols
-                (0..14)
-                    .map(|i| {
-                        buf.get_u1()
-                            .with_context(|| format!("packet status symbol {i}"))
-                            .map(|v| v.into())
-                    })
-                    .collect::<ParselyResult<Vec<PacketStatusSymbol>>>()
-                    .context("1 bit packet status symbols")
+                let mut symbols = Vec::with_capacity(14);
+                for i in 0..14 {
+                    let symbol: PacketStatusSymbol = buf
+                        .get_u1()
+                        .with_context(|| format!("packet status symbol {i}"))
+                        .map(|v| v.into())?;
+                    symbols.push(symbol);
+                }
+                symbols
             }
             s if s == 1 => {
                 // 2 bit symbols
-                (0..7)
-                    .map(|i| {
-                        buf.get_u2()
-                            .with_context(|| format!("packet status symbol {i}"))?
-                            .try_into()
-                            .context("converting u2 to packet status symbol")
-                    })
-                    .collect::<ParselyResult<Vec<PacketStatusSymbol>>>()
-                    .context("2 bit packet status symbols")
+                let mut symbols = Vec::with_capacity(7);
+                for i in 0..7 {
+                    let symbol: PacketStatusSymbol = buf
+                        .get_u2()
+                        .with_context(|| format!("packet status symbol {i}"))?
+                        .try_into()
+                        .context("converting u2 to packet status symbol")?;
+                    symbols.push(symbol);
+                }
+                symbols
             }
             _ => unreachable!("u1 can only be 1 or 0"),
-        }
-        .context("Packet status symbols")?;
+        };
 
         packet_status_symbols.truncate(max_symbol_count);
 
@@ -620,7 +622,8 @@ impl_stateless_sync!(SomePacketStatusChunk);
 #[cfg(test)]
 mod test {
     use super::*;
-    use bits_io::prelude::*;
+    use bits_io::bits;
+    // use bits_io::prelude::*;
 
     #[test]
     fn test_sv_chunk_1_bit_symbols() {
@@ -723,9 +726,15 @@ mod test {
     fn test_rtcp_fb_tcc_packet() {
         #[rustfmt::skip]
         let data_buf = [
-            0x01, 0x81, 0x00, 0x08, 0x19, 0xae, 0xe8, 0x45,
-            0xd9, 0x55, 0x20, 0x01, 0xa8, 0xff, 0xfc, 0x04,
-            0x00, 0x50, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00
+            // base seq num = 385, packet status count = 8
+            0x01, 0x81, 0x00, 0x08, 
+            // reference time = 1683176, fk pkt count = 69
+            0x19, 0xae, 0xe8, 0x45,
+            
+            0xd9, 0x55, 0x20, 0x01, 
+            0xa8, 0xff, 0xfc, 0x04,
+            0x00, 0x50, 0x04, 0x00, 
+            0x00, 0x00, 0x00, 0x00
         ];
         let mut bits = Bits::copy_from_bytes(&data_buf[..]);
         let tcc_packet = RtcpFbTccPacket::read::<NetworkOrder>(
@@ -773,59 +782,4 @@ mod test {
             ]
         );
     }
-
-    //
-    // #[test]
-    // fn test_read_tcc_fb_data() {
-    //     #[rustfmt::skip]
-    //     let data_buf = [
-    //         0x01, 0x81, 0x00, 0x08, 0x19, 0xae, 0xe8, 0x45,
-    //         0xd9, 0x55, 0x20, 0x01, 0xa8, 0xff, 0xfc, 0x04,
-    //         0x00, 0x50, 0x04, 0x00, 0x00, 0x00, 0x00, 00
-    //     ];
-    //     let mut cursor = BitCursor::new(BitVec::<u8, Msb0>::from_slice(&data_buf));
-    //     let (packet_reports, reference_time, feedback_packet_count) =
-    //         read_rtcp_fb_tcc_data(&mut cursor).unwrap();
-    //
-    //     assert_eq!(reference_time, u24::new(1683176));
-    //     assert_eq!(feedback_packet_count, 69);
-    //     assert_eq!(
-    //         packet_reports,
-    //         [
-    //             PacketReport::ReceivedPacketSmallDelta {
-    //                 seq_num: 385,
-    //                 delta_ticks: 168,
-    //             },
-    //             PacketReport::ReceivedPacketLargeOrNegativeDelta {
-    //                 seq_num: 386,
-    //                 delta_ticks: -4,
-    //             },
-    //             PacketReport::ReceivedPacketSmallDelta {
-    //                 seq_num: 387,
-    //                 delta_ticks: 4,
-    //             },
-    //             PacketReport::ReceivedPacketSmallDelta {
-    //                 seq_num: 388,
-    //                 delta_ticks: 0,
-    //             },
-    //             PacketReport::ReceivedPacketSmallDelta {
-    //                 seq_num: 389,
-    //                 delta_ticks: 80,
-    //             },
-    //             PacketReport::ReceivedPacketSmallDelta {
-    //                 seq_num: 390,
-    //                 delta_ticks: 4,
-    //             },
-    //             PacketReport::ReceivedPacketSmallDelta {
-    //                 seq_num: 391,
-    //                 delta_ticks: 0,
-    //             },
-    //             PacketReport::ReceivedPacketSmallDelta {
-    //                 seq_num: 392,
-    //                 delta_ticks: 0,
-    //             },
-    //         ]
-    //     );
-    //     dbg!(packet_reports);
-    // }
 }
