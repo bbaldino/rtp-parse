@@ -18,4 +18,4 @@ bytes = "1.6.0"
 parsely-rs = { version = "0.1" }
 
 [dev-dependencies]
-bits-io = { version = "0.6", path = "../bits-io/" }
+bits-io = { version = "0.6" }
