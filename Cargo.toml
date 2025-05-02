@@ -1,6 +1,6 @@
 [package]
 name = "rtp-parse"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Brian Baldino <bbaldino@gmail.com> "]
 edition = "2021"
 
