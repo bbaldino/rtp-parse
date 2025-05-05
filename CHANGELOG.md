@@ -6,6 +6,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/bbaldino/rtp-parse/compare/v0.1.0...v0.2.0) - 2025-05-02
+
+### Added
+
+- rtcp sr support
+- most of tcc packet done (write logic not all there yet)
+- add support for rtcp rr
+- rtp packet impl
+- fixing up rtp header and extensions reading/writing
+
+### Fixed
+
+- optimize some vec usage in tcc packet parsing
+- fix padding consumption for tcc packets
+
+### Other
+
+- remove local link to bits-io
+- update deps
+- clean up deps
+- adapt to parsely changes
+- implement rtp header extension parsing
+- update parsely version and adapt to api changes
+- use parsely for parsing ([#3](https://github.com/bbaldino/rtp-parse/pull/3))
+- release ([#1](https://github.com/bbaldino/rtp-parse/pull/1))
+
 ## [0.1.0](https://github.com/bbaldino/rtp-parse/releases/tag/v0.1.0) - 2024-09-06
 
 ### Other
